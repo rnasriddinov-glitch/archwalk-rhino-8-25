@@ -17,9 +17,9 @@ public static class SessionController
 {
     static readonly HashSet<string> OwnCommands =
     [
-        "AWEnter", "AWExit", "AWReturn", "AWResetInput", "AWPlace", "AWPanel",
+        "AWEnter", "AWExit", "AWReturn", "AWResetInput", "AWPlace", "AWPanel", "AWSaveView",
         "AWP0Input", "AWP0Camera", "AWP0Preview", "AWP0Data", "AWP0Ground", "AWP0RunHostTests",
-        "AWP1RunHostTests", "AWP2RunHostTests"
+        "AWP1RunHostTests", "AWP2RunHostTests", "AWP3RunHostTests"
     ];
 
     static readonly object Gate = new();
@@ -217,6 +217,7 @@ public static class SessionController
         }
 
         State = SessionState.Idle;
+        ArchWalk.RhinoPlugin.Observers.ObserverWorkflow.ClearSessionRecord();
         RhinoApp.WriteLine("ARCHWALK выход (" + kind + "): " + reason);
     }
 

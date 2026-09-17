@@ -25,6 +25,14 @@ public sealed class AWEnterCommand : Command
                 : Fail(message);
         }
 
+        if (ArchWalk.RhinoPlugin.Observers.ObserverWorkflow.SelectedId != Guid.Empty)
+        {
+            return ArchWalk.RhinoPlugin.Observers.ObserverWorkflow.EnterRecord(
+                doc, ArchWalk.RhinoPlugin.Observers.ObserverWorkflow.SelectedId, deferCapture: true)
+                ? Result.Success
+                : Result.Failure;
+        }
+
         // Keep P1 direct enter path for scripted/host use and Fly/RMB options.
         var view = doc.Views.ActiveView;
         if (view is null)

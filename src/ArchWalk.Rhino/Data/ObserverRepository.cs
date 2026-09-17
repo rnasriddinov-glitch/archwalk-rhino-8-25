@@ -1,4 +1,7 @@
+using ArchWalk.Core.Camera;
+using ArchWalk.Core.Motion;
 using ArchWalk.Core.Observers;
+using ArchWalk.Core.Units;
 using Rhino;
 using Rhino.Commands;
 using Rhino.FileIO;
@@ -9,9 +12,21 @@ public static class ObserverRepository
 {
     static readonly Dictionary<uint, Store> Stores = [];
 
+    public static event Action<RhinoDoc>? Changed;
+
     public static ObserverDocumentState Get(RhinoDoc doc) => Ensure(doc).State.Clone();
 
     public static IReadOnlyList<ObserverRecord> List(RhinoDoc doc) => Ensure(doc).State.Records.Select(r => r.Clone()).ToList();
+
+    public static bool TryGet(RhinoDoc doc, Guid id, out ObserverRecord record)
+    {
+        record = null!;
+        var found = Ensure(doc).State.Records.FirstOrDefault(r => r.Id == id);
+        if (found is null)
+            return false;
+        record = found.Clone();
+        return true;
+    }
 
     public static bool ShouldWrite(RhinoDoc doc)
     {
@@ -19,10 +34,60 @@ public static class ObserverRepository
         return !store.ForbidWrite && store.State.Records.Count > 0;
     }
 
+    public static bool IsWriteForbidden(RhinoDoc doc) => Ensure(doc).ForbidWrite;
+
     public static ObserverRecord Add(RhinoDoc doc, ObserverRecord record, bool recordUndo = true)
     {
         Mutate(doc, "ARCHWALK add observer", recordUndo, store => store.State.Records.Add(record.Clone()));
         return record;
+    }
+
+    public static bool Update(RhinoDoc doc, ObserverRecord record, bool recordUndo = true)
+    {
+        var ok = false;
+        Mutate(doc, "ARCHWALK update observer", recordUndo, store =>
+        {
+            var idx = store.State.Records.FindIndex(r => r.Id == record.Id);
+            if (idx < 0)
+                return;
+            var next = record.Clone();
+            next.Revision = store.State.Records[idx].Revision + 1;
+            store.State.Records[idx] = next;
+            ok = true;
+        });
+        return ok;
+    }
+
+    public static bool Delete(RhinoDoc doc, Guid id, bool recordUndo = true)
+    {
+        var ok = false;
+        Mutate(doc, "ARCHWALK delete observer", recordUndo, store =>
+        {
+            ok = store.State.Records.RemoveAll(r => r.Id == id) > 0;
+        });
+        return ok;
+    }
+
+    public static ObserverRecord? Duplicate(RhinoDoc doc, Guid id, bool recordUndo = true)
+    {
+        if (!TryGet(doc, id, out var source))
+            return null;
+        var copy = source.Clone();
+        copy.Id = Guid.NewGuid();
+        copy.Name = NextAutomaticName(doc);
+        copy.Revision = 1;
+        Add(doc, copy, recordUndo);
+        return copy;
+    }
+
+    public static bool Rename(RhinoDoc doc, Guid id, string name, bool recordUndo = true)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+        if (!TryGet(doc, id, out var record))
+            return false;
+        record.Name = name.Trim();
+        return Update(doc, record, recordUndo);
     }
 
     public static bool ReplaceAll(RhinoDoc doc, IEnumerable<ObserverRecord> records, bool recordUndo = true)
@@ -32,6 +97,86 @@ public static class ObserverRepository
             store.State.Records = records.Select(r => r.Clone()).ToList();
         });
         return true;
+    }
+
+    public static string NextAutomaticName(RhinoDoc doc)
+    {
+        var existing = new HashSet<string>(List(doc).Select(r => r.Name), StringComparer.OrdinalIgnoreCase);
+        for (var i = 1; i < 10000; i++)
+        {
+            var name = "Наблюдатель " + i.ToString("00");
+            if (!existing.Contains(name))
+                return name;
+        }
+        return "Наблюдатель " + Guid.NewGuid().ToString("N")[..4];
+    }
+
+    public static ObserverRecord FromPose(
+        CameraPose pose,
+        DocumentUnits units,
+        string name,
+        MovementMode mode,
+        double baseSpeed)
+    {
+        return new ObserverRecord
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            FootXDocument = units.ToDocument(pose.FootXMeters),
+            FootYDocument = units.ToDocument(pose.FootYMeters),
+            FootZDocument = units.ToDocument(pose.FootZMeters),
+            EyeHeightMeters = pose.EyeHeightMeters,
+            YawRadians = pose.YawRadians,
+            PitchRadians = pose.PitchRadians,
+            VerticalFovRadians = pose.VerticalFovRadians,
+            InitialMovementMode = mode,
+            BaseSpeedMetersPerSecond = baseSpeed,
+            Revision = 1
+        };
+    }
+
+    public static CameraPose ToPose(ObserverRecord record, DocumentUnits units) => new(
+        units.ToMeters(record.FootXDocument),
+        units.ToMeters(record.FootYDocument),
+        units.ToMeters(record.FootZDocument),
+        record.EyeHeightMeters,
+        record.YawRadians,
+        record.PitchRadians,
+        record.VerticalFovRadians);
+
+    /// <summary>Scale foot coordinates once when Rhino scales geometry with the unit change.</summary>
+    public static void ApplyGeometryScale(RhinoDoc doc, double scale, bool recordUndo = true)
+    {
+        if (scale <= 0 || double.IsNaN(scale) || double.IsInfinity(scale))
+            return;
+        Mutate(doc, "ARCHWALK units scale", recordUndo, store =>
+        {
+            foreach (var record in store.State.Records)
+            {
+                record.FootXDocument *= scale;
+                record.FootYDocument *= scale;
+                record.FootZDocument *= scale;
+                record.Revision++;
+            }
+            store.State.MetersPerDocumentUnit = UnitScaleOf(doc);
+        });
+    }
+
+    /// <summary>Numeric foot coords unchanged; refresh stored meters-per-unit after a unit rename without scaling.</summary>
+    public static void RefreshStoredUnitScale(RhinoDoc doc, bool recordUndo = false)
+    {
+        Mutate(doc, "ARCHWALK units refresh", recordUndo, store =>
+        {
+            store.State.MetersPerDocumentUnit = UnitScaleOf(doc);
+        });
+    }
+
+    public static void InstallUnitHooks()
+    {
+        RhinoDoc.UnitsChangedWithScaling -= OnUnitsScaled;
+        RhinoDoc.UnitsChangedWithScaling += OnUnitsScaled;
+        RhinoDoc.DocumentPropertiesChanged -= OnDocProps;
+        RhinoDoc.DocumentPropertiesChanged += OnDocProps;
     }
 
     public static void Write(RhinoDoc doc, BinaryArchiveWriter archive)
@@ -87,7 +232,7 @@ public static class ObserverRepository
                 YawRadians = archive.ReadDouble(),
                 PitchRadians = archive.ReadDouble(),
                 VerticalFovRadians = archive.ReadDouble(),
-                InitialMovementMode = (Core.Motion.MovementMode)archive.ReadInt(),
+                InitialMovementMode = (MovementMode)archive.ReadInt(),
                 BaseSpeedMetersPerSecond = archive.ReadDouble(),
                 Revision = archive.ReadInt()
             });
@@ -101,6 +246,7 @@ public static class ObserverRepository
         store.State.SchemaVersion = schema;
         store.State.MetersPerDocumentUnit = meters;
         store.State.Records = records;
+        RaiseChanged(doc);
     }
 
     public static void Remove(RhinoDoc? doc)
@@ -108,6 +254,27 @@ public static class ObserverRepository
         if (doc is null)
             return;
         Stores.Remove(doc.RuntimeSerialNumber);
+    }
+
+    static void OnUnitsScaled(object? sender, UnitsChangedWithScalingEventArgs e)
+    {
+        if (e.Document is null)
+            return;
+        ApplyGeometryScale(e.Document, e.Scale, recordUndo: true);
+    }
+
+    static void OnDocProps(object? sender, DocumentEventArgs e)
+    {
+        var doc = e.Document;
+        if (doc is null)
+            return;
+        var store = Ensure(doc);
+        var now = UnitScaleOf(doc);
+        if (Math.Abs(store.State.MetersPerDocumentUnit - now) <= 1e-15)
+            return;
+        // Without scaling the numeric coordinates stay; only the stored scale tag updates.
+        // Scale-with-geometry is handled by UnitsChangedWithScaling first.
+        RefreshStoredUnitScale(doc, recordUndo: false);
     }
 
     static Store Ensure(RhinoDoc doc)
@@ -151,6 +318,7 @@ public static class ObserverRepository
             if (began)
                 doc.EndUndoRecord(serial);
         }
+        RaiseChanged(doc);
     }
 
     static void OnUndo(object? sender, CustomUndoEventArgs e)
@@ -162,10 +330,17 @@ public static class ObserverRepository
         var current = store.State.Clone();
         store.State = previous.Clone();
         doc.AddCustomUndoEvent(e.ActionDescription, OnUndo, current);
+        RaiseChanged(doc);
     }
 
     static double UnitScaleOf(RhinoDoc doc) =>
         RhinoMath.UnitScale(doc.ModelUnitSystem, UnitSystem.Meters);
+
+    static void RaiseChanged(RhinoDoc doc)
+    {
+        try { Changed?.Invoke(doc); }
+        catch { /* UI refresh must not break data */ }
+    }
 
     sealed class Store
     {

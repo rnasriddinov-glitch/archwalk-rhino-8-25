@@ -355,24 +355,10 @@ public static class PlacementController
             draft = _draft.Clone();
         }
 
-        if (!RhinoUnits.TryFromDoc(doc, out var units, out var error))
+        var record = ArchWalk.RhinoPlugin.Observers.ObserverWorkflow.CommitDraft(doc, draft, thenEnter: false);
+        if (record is null)
         {
-            message = error ?? "Нет единиц.";
-            return false;
-        }
-
-        var source = TargetViewResolver.FindView(doc, draft.SourceViewId) ?? doc.Views.ActiveView;
-        if (source is null)
-        {
-            message = "Нет исходного вида.";
-            return false;
-        }
-
-        var target = TargetViewResolver.EnsureTargetView(doc, draft, source);
-        var pose = draft.ToPose(units);
-        if (!SessionController.Enter(doc, target, pose, draft.MovementMode, draft.LookProfile, deferCapture))
-        {
-            message = "Не удалось войти в прогулку.";
+            message = "Не удалось сохранить наблюдателя.";
             return false;
         }
 
@@ -383,6 +369,13 @@ public static class PlacementController
             EnsureConduit(false);
         }
         RaiseChanged();
+
+        if (!ArchWalk.RhinoPlugin.Observers.ObserverWorkflow.EnterRecord(doc, record.Id, deferCapture))
+        {
+            message = "Запись сохранена, но вход не удался.";
+            return false;
+        }
+
         return true;
     }
 
@@ -403,9 +396,15 @@ public static class PlacementController
             EnsureConduit(false);
         }
 
-        // Persistence of observers is P3; P2 clears the draft without Undo pollution.
-        _ = draft;
-        _ = doc;
+        var record = ArchWalk.RhinoPlugin.Observers.ObserverWorkflow.CommitDraft(doc, draft, thenEnter: false);
+        if (record is null)
+        {
+            message = "Не удалось сохранить наблюдателя.";
+            RaiseChanged();
+            return false;
+        }
+
+        RhinoApp.WriteLine("ARCHWALK: сохранён " + record.Name);
         RaiseChanged();
         return true;
     }

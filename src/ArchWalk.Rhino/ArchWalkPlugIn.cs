@@ -25,9 +25,11 @@ public sealed class ArchWalkPlugIn : PlugIn
     {
         Instance = this;
         SessionController.InstallHostHooks();
+        ObserverRepository.InstallUnitHooks();
         RhinoDoc.CloseDocument += (_, e) =>
         {
             PlacementController.Cancel("document-close");
+            ArchWalk.RhinoPlugin.Observers.ObserverWorkflow.EnsureMarkers(null, false);
             ObserverRepository.Remove(e.Document);
             InputSession.Release("document-close");
         };

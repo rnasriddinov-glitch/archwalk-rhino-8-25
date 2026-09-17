@@ -1,6 +1,10 @@
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using ArchWalk.Core.Motion;
+using ArchWalk.Core.Observers;
+using ArchWalk.RhinoPlugin.Data;
+using ArchWalk.RhinoPlugin.Observers;
 using ArchWalk.RhinoPlugin.Placement;
 using ArchWalk.RhinoPlugin.Session;
 using Rhino;
@@ -21,12 +25,20 @@ public sealed class ObserverPanel : UserControl, IPanel
     readonly CheckBox _lookAt3D;
     readonly PictureBox _preview;
     readonly Label _previewCaption;
+    readonly ListBox _list;
+    readonly TextBox _rename;
     readonly Button _place;
     readonly Button _enter;
     readonly Button _done;
     readonly Button _editFoot;
     readonly Button _editAim;
     readonly Button _cancel;
+    readonly Button _update;
+    readonly Button _newHere;
+    readonly Button _dup;
+    readonly Button _delete;
+    readonly Button _saveView;
+    readonly Button _renameApply;
     bool _suppressEvents;
 
     public ObserverPanel()
@@ -57,7 +69,7 @@ public sealed class ObserverPanel : UserControl, IPanel
         {
             Text = "Кликните место, затем направление взгляда. Высота 1550 мм, скорость 1,3 м/с.",
             AutoSize = true,
-            MaximumSize = new Size(320, 0),
+            MaximumSize = new Size(340, 0),
             Margin = new Padding(0, 0, 0, 8)
         };
 
@@ -76,6 +88,20 @@ public sealed class ObserverPanel : UserControl, IPanel
             PlacementController.SetLookAt3D(_lookAt3D.Checked);
             RefreshUi();
         };
+
+        _list = new ListBox { Height = 110, Dock = DockStyle.Top, Margin = new Padding(0, 4, 0, 4) };
+        _list.DisplayMember = nameof(ObserverRecord.Name);
+        _list.SelectedIndexChanged += (_, _) =>
+        {
+            if (_suppressEvents) return;
+            if (_list.SelectedItem is ObserverRecord record)
+                ObserverWorkflow.Select(record.Id);
+            RefreshUi();
+        };
+        _list.DoubleClick += (_, _) => OnEnterSelected(null, EventArgs.Empty);
+
+        _rename = new TextBox { Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 4) };
+        _renameApply = MakeButton("Переименовать", OnRename);
 
         _previewCaption = new Label { Text = "Превью Shaded", AutoSize = true, Margin = new Padding(0, 4, 0, 2) };
         _preview = new PictureBox
@@ -96,7 +122,12 @@ public sealed class ObserverPanel : UserControl, IPanel
         _editFoot = MakeButton("Изменить место", OnEditFoot);
         _editAim = MakeButton("Изменить взгляд", OnEditAim);
         _cancel = MakeButton("Отмена", OnCancel);
-        row.Controls.AddRange([_enter, _done, _editFoot, _editAim, _cancel]);
+        _update = MakeButton("Обновить наблюдателя", OnUpdate);
+        _newHere = MakeButton("Новый наблюдатель здесь", OnNewHere);
+        _dup = MakeButton("Дублировать", OnDup);
+        _delete = MakeButton("Удалить", OnDelete);
+        _saveView = MakeButton("Сохранить вид Rhino", OnSaveView);
+        row.Controls.AddRange([_enter, _done, _editFoot, _editAim, _cancel, _update, _newHere, _dup, _delete, _saveView]);
 
         root.Controls.Add(title);
         root.Controls.Add(_hint);
@@ -104,6 +135,10 @@ public sealed class ObserverPanel : UserControl, IPanel
         root.Controls.Add(_targetCaption);
         root.Controls.Add(_targetList);
         root.Controls.Add(_lookAt3D);
+        root.Controls.Add(new Label { Text = "Сохранённые", AutoSize = true, Margin = new Padding(0, 6, 0, 2) });
+        root.Controls.Add(_list);
+        root.Controls.Add(_rename);
+        root.Controls.Add(_renameApply);
         root.Controls.Add(_previewCaption);
         root.Controls.Add(_preview);
         root.Controls.Add(_status);
@@ -111,25 +146,52 @@ public sealed class ObserverPanel : UserControl, IPanel
         Controls.Add(root);
 
         PlacementController.Changed += OnPlacementChanged;
-        HandleDestroyed += (_, _) => PlacementController.Changed -= OnPlacementChanged;
-        Load += (_, _) => RefreshUi();
+        ObserverRepository.Changed += OnRepoChanged;
+        ObserverWorkflow.UiChanged += OnPlacementChanged;
+        HandleDestroyed += (_, _) =>
+        {
+            PlacementController.Changed -= OnPlacementChanged;
+            ObserverRepository.Changed -= OnRepoChanged;
+            ObserverWorkflow.UiChanged -= OnPlacementChanged;
+        };
+        Load += (_, _) =>
+        {
+            ObserverWorkflow.EnsureMarkers(RhinoDoc.ActiveDoc, true);
+            RefreshUi();
+        };
     }
 
-    public void PanelShown(uint documentSerialNumber, ShowPanelReason reason) => RefreshUi();
-    public void PanelHidden(uint documentSerialNumber, ShowPanelReason reason) { }
-    public void PanelClosing(uint documentSerialNumber, bool onCloseDocument) { }
+    public void PanelShown(uint documentSerialNumber, ShowPanelReason reason)
+    {
+        ObserverWorkflow.EnsureMarkers(RhinoDoc.ActiveDoc, true);
+        RefreshUi();
+    }
+
+    public void PanelHidden(uint documentSerialNumber, ShowPanelReason reason) =>
+        ObserverWorkflow.EnsureMarkers(null, false);
+
+    public void PanelClosing(uint documentSerialNumber, bool onCloseDocument)
+    {
+        if (SessionController.IsActive)
+            SessionController.Exit(WalkExitKind.KeepView, "panel-close");
+        ObserverWorkflow.EnsureMarkers(null, false);
+    }
 
     void OnPlacementChanged()
     {
-        if (IsDisposed || !IsHandleCreated)
-            return;
+        if (IsDisposed || !IsHandleCreated) return;
+        BeginInvoke(RefreshUi);
+    }
+
+    void OnRepoChanged(RhinoDoc doc)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
         BeginInvoke(RefreshUi);
     }
 
     void RefreshUi()
     {
-        if (IsDisposed)
-            return;
+        if (IsDisposed) return;
         _suppressEvents = true;
         try
         {
@@ -142,20 +204,34 @@ public sealed class ObserverPanel : UserControl, IPanel
             _status.Text = string.IsNullOrWhiteSpace(draft.StatusMessage)
                 ? (draft.Phase == PlacementPhase.Idle ? "Готово к установке" : draft.Phase.ToString())
                 : draft.StatusMessage;
+            if (doc is not null && ObserverRepository.IsWriteForbidden(doc))
+                _status.Text = "Неизвестная схема данных — запись в 3dm заблокирована";
 
             _lookAt3D.Checked = draft.LookAt3D;
-            _enter.Enabled = draft.IsReady && !SessionController.IsActive;
+            _enter.Enabled = (draft.IsReady || ObserverWorkflow.SelectedId != Guid.Empty) && !SessionController.IsActive;
             _done.Enabled = draft.IsReady;
             _editFoot.Enabled = draft.Phase != PlacementPhase.Idle;
             _editAim.Enabled = draft.HasFoot;
             _cancel.Enabled = draft.Phase != PlacementPhase.Idle;
+            var hasSelection = ObserverWorkflow.SelectedId != Guid.Empty;
+            _dup.Enabled = hasSelection;
+            _delete.Enabled = hasSelection;
+            _renameApply.Enabled = hasSelection;
+            _update.Enabled = SessionController.IsActive && (ObserverWorkflow.SessionRecordId != Guid.Empty || hasSelection);
+            _newHere.Enabled = SessionController.IsActive;
+            _saveView.Enabled = true;
 
             if (doc is not null)
+            {
                 RebuildTargets(doc, draft);
+                RebuildList(doc);
+            }
 
-            var enterLabel = draft.CreateNewTargetView
-                ? "Войти в новое окно"
-                : "Войти в " + (string.IsNullOrWhiteSpace(draft.TargetLabel) ? "Perspective" : draft.TargetLabel);
+            var enterLabel = draft.IsReady
+                ? (draft.CreateNewTargetView
+                    ? "Войти в новое окно"
+                    : "Войти в " + (string.IsNullOrWhiteSpace(draft.TargetLabel) ? "Perspective" : draft.TargetLabel))
+                : "Войти";
             _enter.Text = enterLabel;
             _previewCaption.Text = draft.Phase is PlacementPhase.Aiming or PlacementPhase.Ready
                 ? "Превью Shaded · " + enterLabel
@@ -174,6 +250,30 @@ public sealed class ObserverPanel : UserControl, IPanel
         {
             _suppressEvents = false;
         }
+    }
+
+    void RebuildList(RhinoDoc doc)
+    {
+        var selected = ObserverWorkflow.SelectedId;
+        _list.Items.Clear();
+        var records = ObserverRepository.List(doc);
+        var index = -1;
+        for (var i = 0; i < records.Count; i++)
+        {
+            _list.Items.Add(records[i]);
+            if (records[i].Id == selected)
+                index = i;
+        }
+        if (index >= 0)
+            _list.SelectedIndex = index;
+        else if (records.Count > 0 && selected == Guid.Empty)
+        {
+            _list.SelectedIndex = 0;
+            ObserverWorkflow.SelectedId = records[0].Id;
+        }
+
+        if (_list.SelectedItem is ObserverRecord rec)
+            _rename.Text = rec.Name;
     }
 
     void RebuildTargets(RhinoDoc doc, PlacementDraft draft)
@@ -195,7 +295,6 @@ public sealed class ObserverPanel : UserControl, IPanel
 
         if (_targetList.Items.Count > 0)
             _targetList.SelectedIndex = selected;
-        _targetList.DisplayMember = nameof(TargetViewChoice.Label);
     }
 
     void OnTargetChanged()
@@ -203,41 +302,50 @@ public sealed class ObserverPanel : UserControl, IPanel
         if (_suppressEvents || _targetList.SelectedItem is not TargetViewChoice choice)
             return;
         var doc = RhinoDoc.ActiveDoc;
-        if (doc is null)
-            return;
+        if (doc is null) return;
         PlacementController.SetTargetChoice(doc, choice);
     }
 
     void OnPlace(object? sender, EventArgs e)
     {
-        var doc = RhinoDoc.ActiveDoc;
-        if (doc is null)
-            return;
         if (Rhino.Commands.Command.InCommand())
         {
             _status.Text = "Завершите текущую команду Rhino";
             return;
         }
-
         RhinoApp.RunScript("_AWPlace", false);
     }
 
     void OnEnter(object? sender, EventArgs e)
     {
         var doc = RhinoDoc.ActiveDoc;
-        if (doc is null)
+        if (doc is null) return;
+        if (PlacementController.Draft.IsReady)
+        {
+            if (!PlacementController.TryEnter(doc, deferCapture: true, out var message))
+                _status.Text = message;
+            else
+                RefreshUi();
             return;
-        if (!PlacementController.TryEnter(doc, deferCapture: true, out var message))
-            _status.Text = message;
-        else
-            RefreshUi();
+        }
+
+        OnEnterSelected(sender, e);
+    }
+
+    void OnEnterSelected(object? sender, EventArgs e)
+    {
+        var doc = RhinoDoc.ActiveDoc;
+        if (doc is null || ObserverWorkflow.SelectedId == Guid.Empty)
+            return;
+        if (!ObserverWorkflow.EnterRecord(doc, ObserverWorkflow.SelectedId, deferCapture: true))
+            _status.Text = "Не удалось войти в запись";
+        RefreshUi();
     }
 
     void OnDone(object? sender, EventArgs e)
     {
         var doc = RhinoDoc.ActiveDoc;
-        if (doc is null)
-            return;
+        if (doc is null) return;
         if (!PlacementController.TryFinishWithoutEnter(doc, out var message))
             _status.Text = message;
         else
@@ -257,6 +365,51 @@ public sealed class ObserverPanel : UserControl, IPanel
     }
 
     void OnCancel(object? sender, EventArgs e) => PlacementController.Cancel("panel");
+
+    void OnUpdate(object? sender, EventArgs e)
+    {
+        var doc = RhinoDoc.ActiveDoc;
+        if (doc is null) return;
+        ObserverWorkflow.UpdateSelectedFromWalk(doc);
+        RefreshUi();
+    }
+
+    void OnNewHere(object? sender, EventArgs e)
+    {
+        var doc = RhinoDoc.ActiveDoc;
+        if (doc is null) return;
+        ObserverWorkflow.NewObserverHere(doc);
+        RefreshUi();
+    }
+
+    void OnDup(object? sender, EventArgs e)
+    {
+        var doc = RhinoDoc.ActiveDoc;
+        if (doc is null || ObserverWorkflow.SelectedId == Guid.Empty) return;
+        var copy = ObserverRepository.Duplicate(doc, ObserverWorkflow.SelectedId);
+        if (copy is not null)
+            ObserverWorkflow.Select(copy.Id);
+        RefreshUi();
+    }
+
+    void OnDelete(object? sender, EventArgs e)
+    {
+        var doc = RhinoDoc.ActiveDoc;
+        if (doc is null || ObserverWorkflow.SelectedId == Guid.Empty) return;
+        ObserverRepository.Delete(doc, ObserverWorkflow.SelectedId);
+        ObserverWorkflow.SelectedId = Guid.Empty;
+        RefreshUi();
+    }
+
+    void OnRename(object? sender, EventArgs e)
+    {
+        var doc = RhinoDoc.ActiveDoc;
+        if (doc is null || ObserverWorkflow.SelectedId == Guid.Empty) return;
+        ObserverRepository.Rename(doc, ObserverWorkflow.SelectedId, _rename.Text);
+        RefreshUi();
+    }
+
+    void OnSaveView(object? sender, EventArgs e) => RhinoApp.RunScript("_AWSaveView", false);
 
     static Button MakeButton(string text, EventHandler onClick)
     {

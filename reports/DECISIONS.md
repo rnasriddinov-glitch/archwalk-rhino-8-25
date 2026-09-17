@@ -23,5 +23,8 @@ Started from `06_RESEARCH_AND_DECISIONS.md`. Confirmed on Rhino 8.25.25328.11001
 | I17 | Live preview stays on owned floating `ARCHWALK_PREVIEW` view; panel shows `DrawToBitmap` | Same P0C path; working view unchanged |
 | I18 | WinForms `ObserverPanel` registered as Rhino panel «Наблюдатель» | Windows-only v1; Eto not required |
 | I19 | Default foot source in P2 UI is **По отметке**; Surface option probes ground meshes and refuses empty hits | Full surface walking remains P4 |
+| I20 | Placement Enter/Готово commits one `ObserverRecord` before walk | Draft never writes Undo until confirm |
+| I21 | Named Views via `NamedViews.Add(name, viewportId)`; overwrite only with explicit Replace | P3-named-view |
+| I22 | Unit scale: multiply foot document coords by `UnitsChangedWithScaling.Scale`; keep `EyeHeightMeters` | P3-units-scale |
 
 `RhinoDoc.Redo()` after custom undo on headless 8.25 returned false in-process. The swap callback is still implemented for command-scoped redo (P3).
