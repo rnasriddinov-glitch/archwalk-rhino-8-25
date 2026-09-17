@@ -77,6 +77,7 @@ public static class PlacementController
             {
                 Phase = PlacementPhase.PlacingFoot,
                 FootSource = footSource,
+                MovementMode = footSource == FootSourceKind.Surface ? MovementMode.Surface : MovementMode.Level,
                 DocumentSerial = doc.RuntimeSerialNumber,
                 SourceViewId = sourceView.MainViewport.Id,
                 TargetViewId = target.ViewId,
@@ -131,6 +132,7 @@ public static class PlacementController
         lock (Gate)
         {
             _draft.FootSource = kind;
+            _draft.MovementMode = kind == FootSourceKind.Surface ? MovementMode.Surface : MovementMode.Level;
             _draft.StatusMessage = kind == FootSourceKind.Level
                 ? "Кликните место у ног (По отметке)"
                 : "Кликните опору под ногами";
@@ -157,8 +159,15 @@ public static class PlacementController
 
             if (_draft.FootSource == FootSourceKind.Surface)
             {
-                var snap = GroundMeshExtractor.Extract(doc);
-                if (!GroundMeshExtractor.TryFindSupport(snap, cursorDocument, units, 2.0, 4.0, out var hit))
+                var cache = GroundCacheBuilder.GetOrBuild(doc, units);
+                if (!cache.TryProbeDocument(
+                        cursorDocument.X,
+                        cursorDocument.Y,
+                        cursorDocument.Z,
+                        units.ToDocument(2.0),
+                        units.ToDocument(4.0),
+                        out var hitZ,
+                        out _))
                 {
                     _draft.HasValidSupport = false;
                     _draft.StatusMessage = "Нет опоры — выберите «По отметке»";
@@ -168,14 +177,16 @@ public static class PlacementController
                     return false;
                 }
 
-                cursorDocument = hit;
+                cursorDocument = new Point3d(cursorDocument.X, cursorDocument.Y, hitZ);
                 _draft.HasValidSupport = true;
+                _draft.MovementMode = MovementMode.Surface;
             }
             else
             {
                 // Level: keep Z from hint (last level / CPlane), XY from cursor.
                 cursorDocument = new Point3d(cursorDocument.X, cursorDocument.Y, _draft.LevelHintZDocument);
                 _draft.HasValidSupport = true;
+                _draft.MovementMode = MovementMode.Level;
             }
 
             _draft.FootXDocument = cursorDocument.X;

@@ -96,9 +96,7 @@ public static class ObserverWorkflow
         };
         var view = TargetViewResolver.EnsureTargetView(doc, shell, source);
         var pose = ObserverRepository.ToPose(record, units);
-        var mode = record.InitialMovementMode == MovementMode.Surface
-            ? MovementMode.Level
-            : record.InitialMovementMode;
+        var mode = record.InitialMovementMode;
         if (!SessionController.Enter(doc, view, pose, mode, MouseLookProfile.FreeLook, deferCapture))
             return false;
 
@@ -138,9 +136,7 @@ public static class ObserverWorkflow
         record.YawRadians = pose.YawRadians;
         record.PitchRadians = pose.PitchRadians;
         record.VerticalFovRadians = pose.VerticalFovRadians;
-        record.InitialMovementMode = SessionController.Core.Mode == MovementMode.Fly
-            ? MovementMode.Fly
-            : MovementMode.Level;
+        record.InitialMovementMode = PersistMode(SessionController.Core.Mode);
         record.BaseSpeedMetersPerSecond = SessionController.Core.BaseSpeedMetersPerSecond;
         var ok = ObserverRepository.Update(doc, record);
         if (ok)
@@ -157,7 +153,7 @@ public static class ObserverWorkflow
             SessionController.Core.Pose,
             units,
             ObserverRepository.NextAutomaticName(doc),
-            SessionController.Core.Mode == MovementMode.Fly ? MovementMode.Fly : MovementMode.Level,
+            PersistMode(SessionController.Core.Mode),
             SessionController.Core.BaseSpeedMetersPerSecond);
         ObserverRepository.Add(doc, record);
         _selectedId = record.Id;
@@ -171,6 +167,13 @@ public static class ObserverWorkflow
         _sessionRecordId = Guid.Empty;
         RaiseUi();
     }
+
+    static MovementMode PersistMode(MovementMode mode) => mode switch
+    {
+        MovementMode.Fly => MovementMode.Fly,
+        MovementMode.Surface => MovementMode.Surface,
+        _ => MovementMode.Level
+    };
 
     public static void EnsureMarkers(RhinoDoc? doc, bool show)
     {

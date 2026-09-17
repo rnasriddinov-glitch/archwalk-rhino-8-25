@@ -1,5 +1,6 @@
 using ArchWalk.Core.Camera;
 using ArchWalk.Core.Math;
+using ArchWalk.Core.Support;
 
 namespace ArchWalk.Core.Motion;
 
@@ -19,21 +20,35 @@ public sealed class MotionCore
     MovementMode _mode;
     double _baseSpeed;
     CameraPose _sessionStart;
-
     MovementMode _sessionStartMode;
     double _sessionStartSpeed;
+    ISupportField? _support;
+    double _supportToleranceMeters;
+    bool _eyeSmoothing;
+    double _displayEyeZ;
+    string? _hudHint;
 
-    public MotionCore(CameraPose pose, MovementMode mode, double baseSpeedMetersPerSecond)
+    public MotionCore(
+        CameraPose pose,
+        MovementMode mode,
+        double baseSpeedMetersPerSecond,
+        ISupportField? support = null,
+        double supportToleranceMeters = MotionDefaults.SupportToleranceMinMeters,
+        bool eyeSmoothing = true)
     {
-        if (mode == MovementMode.Surface)
-            throw new ArgumentOutOfRangeException(nameof(mode), "Surface walking is P4; P1 uses Level and Fly.");
+        if (mode == MovementMode.Surface && support is null)
+            throw new ArgumentOutOfRangeException(nameof(support), "Surface walking requires an ISupportField.");
         _pose = Sanitize(pose);
         _mode = mode;
         _baseSpeed = ClampSpeed(baseSpeedMetersPerSecond);
+        _support = support;
+        _supportToleranceMeters = SurfaceNavigator.ClampSupportTolerance(supportToleranceMeters);
+        _eyeSmoothing = eyeSmoothing;
         _sessionStart = _pose;
         _sessionStartMode = _mode;
         _sessionStartSpeed = _baseSpeed;
         _velocity = Vec3.Zero;
+        _displayEyeZ = _pose.EyeMeters.Z;
     }
 
     public static MotionCore CreateDefaultLevel() =>
@@ -42,12 +57,44 @@ public sealed class MotionCore
     public static MotionCore CreateDefaultFly() =>
         new(CameraPose.CreateDefault(), MovementMode.Fly, MotionDefaults.BaseSpeedMetersPerSecond);
 
+    public static MotionCore CreateDefaultSurface(ISupportField support) =>
+        new(CameraPose.CreateDefault(), MovementMode.Surface, MotionDefaults.BaseSpeedMetersPerSecond, support);
+
     public CameraPose Pose => _pose;
+
+    /// <summary>Pose used for the Rhino camera; eye Z may lag physical feet during step smoothing.</summary>
+    public CameraPose RenderPose
+    {
+        get
+        {
+            if (_mode != MovementMode.Surface || !_eyeSmoothing)
+                return _pose;
+            var footZ = _displayEyeZ - _pose.EyeHeightMeters;
+            return _pose.WithFoot(new Vec3(_pose.FootXMeters, _pose.FootYMeters, footZ));
+        }
+    }
+
     public Vec3 Velocity => _velocity;
     public MovementMode Mode => _mode;
     public double BaseSpeedMetersPerSecond => _baseSpeed;
     public CameraPose SessionStart => _sessionStart;
     public MovementMode SessionStartMode => _sessionStartMode;
+    public string? HudHint => _hudHint;
+    public double DisplayEyeZMeters => _displayEyeZ;
+    public bool EyeSmoothingEnabled => _eyeSmoothing;
+
+    public void SetSupportField(ISupportField? support, double supportToleranceMeters = MotionDefaults.SupportToleranceMinMeters)
+    {
+        _support = support;
+        _supportToleranceMeters = SurfaceNavigator.ClampSupportTolerance(supportToleranceMeters);
+    }
+
+    public void SetEyeSmoothing(bool enabled)
+    {
+        _eyeSmoothing = enabled;
+        if (!enabled)
+            _displayEyeZ = _pose.EyeMeters.Z;
+    }
 
     public void RememberSessionStart()
     {
@@ -61,17 +108,45 @@ public sealed class MotionCore
         _pose = _sessionStart;
         _mode = _sessionStartMode;
         _baseSpeed = _sessionStartSpeed;
+        _displayEyeZ = _pose.EyeMeters.Z;
         HardStop();
+        _hudHint = null;
     }
 
     public void SetMode(MovementMode mode)
     {
-        if (mode == MovementMode.Surface)
-            throw new ArgumentOutOfRangeException(nameof(mode), "Surface walking is P4; P1 uses Level and Fly.");
+        if (mode == MovementMode.Surface && _support is null)
+            throw new InvalidOperationException("Surface walking requires an ISupportField.");
         if (_mode == mode)
             return;
         _mode = mode;
         HardStop();
+        _hudHint = null;
+        if (mode == MovementMode.Surface)
+            SnapDisplayEye();
+    }
+
+    public bool TryAttachSurface()
+    {
+        if (_support is null)
+            return false;
+        if (!SurfaceNavigator.CanAttach(_support, _pose.FootMeters, _supportToleranceMeters))
+            return false;
+        if (!SurfaceNavigator.TryResolveFoot(
+                _support,
+                _pose.FootMeters,
+                _pose.FootXMeters,
+                _pose.FootYMeters,
+                _supportToleranceMeters,
+                out var foot,
+                out _))
+            return false;
+        _pose = _pose.WithFoot(foot);
+        _mode = MovementMode.Surface;
+        HardStop();
+        SnapDisplayEye();
+        _hudHint = null;
+        return true;
     }
 
     public void HardStop()
@@ -80,7 +155,12 @@ public sealed class MotionCore
         _accumulator = 0;
     }
 
-    public void SetFootMeters(Vec3 foot) => _pose = _pose.WithFoot(foot);
+    public void SetFootMeters(Vec3 foot)
+    {
+        _pose = _pose.WithFoot(foot);
+        if (_mode != MovementMode.Surface || !_eyeSmoothing)
+            _displayEyeZ = _pose.EyeMeters.Z;
+    }
 
     public void SetBaseSpeed(double metersPerSecond) => _baseSpeed = ClampSpeed(metersPerSecond);
 
@@ -146,6 +226,8 @@ public sealed class MotionCore
     {
         if (_mode == MovementMode.Fly)
             TickFly(intent);
+        else if (_mode == MovementMode.Surface)
+            TickSurface(intent);
         else
             TickLevel(intent);
     }
@@ -175,6 +257,70 @@ public sealed class MotionCore
             z -= MotionDefaults.VerticalSpeedMetersPerSecond * dt;
         foot = new Vec3(foot.X, foot.Y, z);
         _pose = _pose.WithFoot(foot);
+        _displayEyeZ = _pose.EyeMeters.Z;
+        _hudHint = null;
+    }
+
+    void TickSurface(in InputIntent intent)
+    {
+        var dt = MotionDefaults.TickSeconds;
+        if (_support is null)
+            throw new InvalidOperationException("Surface walking requires an ISupportField.");
+
+        if (intent.Up || intent.Down)
+            _hudHint = "F — полёт для смены уровня";
+        else
+            _hudHint = null;
+
+        var basis = _pose.Basis();
+        var wish = Vec3.Zero;
+        if (intent.Forward) wish += basis.Horizontal;
+        if (intent.Back) wish -= basis.Horizontal;
+        if (intent.Right) wish += basis.Right;
+        if (intent.Left) wish -= basis.Right;
+        if (wish.LengthSquared > 1e-18)
+            wish = wish.WithZ(0).Normalized();
+        else
+            wish = Vec3.Zero;
+
+        var target = wish * (_baseSpeed * intent.HorizontalSpeedMultiplier);
+        _velocity = SmoothVelocity(_velocity, target, dt);
+
+        var from = _pose.FootMeters;
+        var proposed = from + (_velocity * dt);
+        var step = SurfaceNavigator.TryMove(
+            _support,
+            from,
+            proposed.X,
+            proposed.Y,
+            _supportToleranceMeters);
+
+        if (step.Status == SurfaceStepStatus.Blocked)
+        {
+            _velocity = Vec3.Zero;
+            if (_hudHint is null)
+                _hudHint = step.Hint;
+        }
+        else
+        {
+            _pose = _pose.WithFoot(step.FootMeters);
+            if (step.Status == SurfaceStepStatus.Slid)
+            {
+                var delta = new Vec3(step.FootMeters.X - from.X, step.FootMeters.Y - from.Y, 0);
+                if (delta.LengthSquared > 1e-18)
+                {
+                    var dir = delta.Normalized();
+                    var keep = Vec3.Dot(_velocity, dir);
+                    _velocity = keep > 0 ? dir * keep : Vec3.Zero;
+                }
+                else
+                {
+                    _velocity = Vec3.Zero;
+                }
+            }
+        }
+
+        _displayEyeZ = SurfaceNavigator.SmoothEyeZ(_displayEyeZ, _pose.EyeMeters.Z, dt, _eyeSmoothing);
     }
 
     void TickFly(in InputIntent intent)
@@ -197,7 +343,11 @@ public sealed class MotionCore
         _velocity = SmoothVelocity(_velocity, target, dt);
         var eye = _pose.EyeMeters + (_velocity * dt);
         _pose = _pose.WithFoot(new Vec3(eye.X, eye.Y, eye.Z - _pose.EyeHeightMeters));
+        _displayEyeZ = _pose.EyeMeters.Z;
+        _hudHint = null;
     }
+
+    void SnapDisplayEye() => _displayEyeZ = _pose.EyeMeters.Z;
 
     static Vec3 SmoothVelocity(Vec3 current, Vec3 target, double dt)
     {

@@ -12,7 +12,12 @@ sealed class WalkHud : DisplayConduit
 
     public void Bind(Guid viewportId) => _viewportId = viewportId;
 
-    public void Update(SessionState state, MotionCore? core, DocumentUnits units, MouseLookProfile look)
+    public void Update(
+        SessionState state,
+        MotionCore? core,
+        DocumentUnits units,
+        MouseLookProfile look,
+        string? statusMessage = null)
     {
         if (core is null)
         {
@@ -20,17 +25,22 @@ sealed class WalkHud : DisplayConduit
             return;
         }
 
-        var mode = core.Mode == MovementMode.Fly
-            ? "Полёт"
-            : "По отметке Z = " + units.ToDocument(core.Pose.FootZMeters).ToString("0.###");
+        var mode = core.Mode switch
+        {
+            MovementMode.Fly => "Полёт",
+            MovementMode.Surface => "Ходьба",
+            _ => "По отметке Z = " + units.ToDocument(core.Pose.FootZMeters).ToString("0.###")
+        };
         var lookLabel = look == MouseLookProfile.RightButton ? "ПКМ — смотреть" : "мышь — смотреть";
         var pause = state == SessionState.Paused ? "  ПАУЗА — клик в виде чтобы продолжить" : "";
+        var hint = string.IsNullOrEmpty(statusMessage) ? "" : "  · " + statusMessage;
         var fov = core.Pose.VerticalFovRadians * 180.0 / System.Math.PI;
         _text = "ARCHWALK  " + mode
             + "  v=" + core.BaseSpeedMetersPerSecond.ToString("0.00") + " м/с"
             + "  H=" + core.Pose.EyeHeightMeters.ToString("0.000") + " м"
             + "  φv=" + fov.ToString("0.0") + "°"
             + "  WASD — идти · " + lookLabel + " · Tab — курсор · Esc — выйти · Backspace — исходный вид"
+            + hint
             + pause;
     }
 

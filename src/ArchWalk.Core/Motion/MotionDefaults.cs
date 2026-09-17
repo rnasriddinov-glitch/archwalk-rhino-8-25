@@ -41,6 +41,18 @@ public static class MotionDefaults
     public const double ArrowLengthMeters = 1.0;
     public const double FrustumGizmoLengthMeters = 3.0;
 
+    public const double MaxStepUpMeters = 0.220;
+    public const double MaxStepDownMeters = 0.300;
+    public const double MaxSupportSlopeDegrees = 45.0;
+    public const double SupportProbeRadiusMeters = 0.100;
+    public const double EyeSmoothTauSeconds = 0.040;
+    public const double EyeSmoothMaxLagMeters = 0.080;
+    public const double EyeSmoothSettleMeters = 0.002;
+    public const double EyeSmoothSettleSeconds = 0.250;
+    public const double SupportToleranceMinMeters = 0.0005;
+    public const double SupportToleranceMaxMeters = 0.005;
+    public const int MinAuxiliarySupportProbes = 2;
+
     public static double LookRadiansPerLogicalPixel => LookDegreesPerLogicalPixel * System.Math.PI / 180.0;
     public static double MinPitchRadians => MinPitchDegrees * System.Math.PI / 180.0;
     public static double MaxPitchRadians => MaxPitchDegrees * System.Math.PI / 180.0;

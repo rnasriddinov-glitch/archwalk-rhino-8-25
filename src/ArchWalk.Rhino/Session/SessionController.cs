@@ -1,13 +1,16 @@
 using System.Diagnostics;
 using ArchWalk.Core.Camera;
 using ArchWalk.Core.Motion;
+using ArchWalk.Core.Support;
 using ArchWalk.Core.Units;
 using ArchWalk.RhinoPlugin.Camera;
+using ArchWalk.RhinoPlugin.Ground;
 using ArchWalk.RhinoPlugin.Input;
 using ArchWalk.WindowsInput;
 using Rhino;
 using Rhino.Commands;
 using Rhino.Display;
+using Rhino.DocObjects;
 using Rhino.Geometry;
 using Rhino.UI;
 
@@ -19,7 +22,7 @@ public static class SessionController
     [
         "AWEnter", "AWExit", "AWReturn", "AWResetInput", "AWPlace", "AWPanel", "AWSaveView",
         "AWP0Input", "AWP0Camera", "AWP0Preview", "AWP0Data", "AWP0Ground", "AWP0RunHostTests",
-        "AWP1RunHostTests", "AWP2RunHostTests", "AWP3RunHostTests"
+        "AWP1RunHostTests", "AWP2RunHostTests", "AWP3RunHostTests", "AWP4RunHostTests"
     ];
 
     static readonly object Gate = new();
@@ -28,6 +31,7 @@ public static class SessionController
 
     static bool _hooks;
     static bool _idleHooked;
+    static bool _geometryHooks;
     static bool _snapshotRestored;
     static bool _resumeArmed;
     static bool _pendingCapture;
@@ -39,10 +43,14 @@ public static class SessionController
     static DocumentUnits _units;
     static ViewportSnapshot? _snapshot;
     static RhinoView? _view;
+    static RhinoDoc? _doc;
     static MotionCore? _core;
     static WindowsInputBridge? _bridge;
     static WalkHud? _hud;
     static WalkMouseSink? _mouse;
+    static GroundCache? _ground;
+    static ISupportField? _support;
+    static string? _statusMessage;
 
     public static bool SuppressHostScripts { get; set; }
     public static SessionState State { get; private set; } = SessionState.Idle;
@@ -52,6 +60,8 @@ public static class SessionController
     public static Guid ViewId => _viewId;
     public static string? LastExitReason { get; private set; }
     public static string? LastPassthrough { get; private set; }
+    public static string? LastStatusMessage => _statusMessage;
+    public static GroundCache? ActiveGround => _ground;
 
     public static bool IsActive => State is SessionState.Captured or SessionState.Paused or SessionState.EnterPending;
 
@@ -68,6 +78,20 @@ public static class SessionController
         RhinoDoc.UnitsChangedWithScaling += OnUnitsChanged;
         RhinoDoc.DocumentPropertiesChanged += OnDocumentPropertiesChanged;
         RhinoApp.Closing += (_, _) => Reset("rhino-closing");
+        EnsureGeometryHooks();
+    }
+
+    static void EnsureGeometryHooks()
+    {
+        if (_geometryHooks)
+            return;
+        _geometryHooks = true;
+        RhinoDoc.AddRhinoObject += OnGeometryMutated;
+        RhinoDoc.DeleteRhinoObject += OnGeometryMutated;
+        RhinoDoc.ReplaceRhinoObject += OnGeometryReplace;
+        RhinoDoc.UndeleteRhinoObject += OnGeometryMutated;
+        RhinoDoc.ModifyObjectAttributes += OnAttributesChanged;
+        RhinoDoc.LayerTableEvent += OnLayerTableEvent;
     }
 
     public static bool Enter(
@@ -78,8 +102,6 @@ public static class SessionController
         MouseLookProfile look,
         bool deferCapture)
     {
-        if (mode == MovementMode.Surface)
-            throw new ArgumentOutOfRangeException(nameof(mode), "Surface walking is P4; P1 uses Level or Fly.");
         if (!RhinoUnits.TryFromDoc(doc, out var units, out var error))
         {
             if (error is not null)
@@ -91,19 +113,55 @@ public static class SessionController
         if (IsActive)
             Exit(WalkExitKind.KeepView, "re-enter");
 
+        ISupportField? support = null;
+        GroundCache? ground = null;
+        if (mode == MovementMode.Surface)
+        {
+            ground = GroundCacheBuilder.GetOrBuild(doc, units);
+            support = ground.AsSupportField();
+            if (!SurfaceNavigator.CanAttach(support, pose.FootMeters, SupportTolerance(units)))
+            {
+                RhinoApp.WriteLine("ARCHWALK: рядом нет пола — поставьте наблюдателя на поверхность или выберите «По отметке».");
+                return false;
+            }
+            if (!SurfaceNavigator.TryResolveFoot(
+                    support,
+                    pose.FootMeters,
+                    pose.FootXMeters,
+                    pose.FootYMeters,
+                    SupportTolerance(units),
+                    out var snapped,
+                    out _))
+            {
+                RhinoApp.WriteLine("ARCHWALK: опора не подтверждена.");
+                return false;
+            }
+            pose = pose.WithFoot(snapped);
+        }
+
         State = SessionState.EnterPending;
         _view = view;
+        _doc = doc;
         _docSerial = doc.RuntimeSerialNumber;
         _viewId = view.MainViewport.Id;
         _viewportId = view.MainViewport.Id;
         _units = units;
         LookProfile = look;
         _groundMode = mode == MovementMode.Fly ? MovementMode.Level : mode;
+        _ground = ground;
+        _support = support;
         _snapshot = CameraAdapter.Capture(view.MainViewport);
         _snapshotRestored = false;
-        _core = new MotionCore(pose, mode, MotionDefaults.BaseSpeedMetersPerSecond);
+        _core = new MotionCore(
+            pose,
+            mode,
+            MotionDefaults.BaseSpeedMetersPerSecond,
+            support,
+            SupportTolerance(units),
+            eyeSmoothing: mode == MovementMode.Surface);
         LastExitReason = null;
         LastPassthrough = null;
+        _statusMessage = null;
 
         if (!TryApplyCamera())
         {
@@ -376,15 +434,42 @@ public static class SessionController
         if (_core is null || State != SessionState.Captured)
             return;
         if (_core.Mode == MovementMode.Fly)
-            _core.SetMode(_groundMode);
+        {
+            if (_groundMode == MovementMode.Surface)
+            {
+                EnsureSupportReady();
+                if (_support is null || !_core.TryAttachSurface())
+                {
+                    _statusMessage = "Рядом нет пола — поставьте наблюдателя на поверхность";
+                    RhinoApp.WriteLine("ARCHWALK: " + _statusMessage);
+                    UpdateHud();
+                    _view?.Redraw();
+                    return;
+                }
+            }
+            else
+            {
+                _core.SetMode(_groundMode);
+            }
+        }
         else
         {
-            _groundMode = _core.Mode == MovementMode.Surface ? MovementMode.Level : _core.Mode;
+            _groundMode = _core.Mode;
             _core.SetMode(MovementMode.Fly);
+            _statusMessage = null;
         }
         TryApplyCamera();
         UpdateHud();
         _view?.Redraw();
+    }
+
+    static void EnsureSupportReady()
+    {
+        if (_doc is null)
+            return;
+        _ground = GroundCacheBuilder.GetOrBuild(_doc, _units);
+        _support = _ground.AsSupportField();
+        _core?.SetSupportField(_support, SupportTolerance(_units));
     }
 
     static void OnRhinoChord(string name)
@@ -425,6 +510,9 @@ public static class SessionController
                 return;
             }
 
+            if (_core.HudHint is not null)
+                _statusMessage = _core.HudHint;
+
             TryApplyCamera();
             UpdateHud();
             _view.Redraw();
@@ -461,7 +549,7 @@ public static class SessionController
     {
         if (_view is null || _core is null)
             return false;
-        return CameraAdapter.ApplyPose(_view.MainViewport, _core.Pose, _units);
+        return CameraAdapter.ApplyPose(_view.MainViewport, _core.RenderPose, _units);
     }
 
     static void EnsureHud()
@@ -474,7 +562,7 @@ public static class SessionController
 
     static void UpdateHud()
     {
-        _hud?.Update(State, _core, _units, LookProfile);
+        _hud?.Update(State, _core, _units, LookProfile, _statusMessage);
     }
 
     static void DisableHud()
@@ -518,11 +606,21 @@ public static class SessionController
         _resumeArmed = false;
         _lastTimestamp = 0;
         _view = null;
+        _doc = null;
         _core = null;
         _snapshot = null;
+        _ground = null;
+        _support = null;
+        _statusMessage = null;
         _docSerial = 0;
         _viewId = Guid.Empty;
         _viewportId = Guid.Empty;
+    }
+
+    static double SupportTolerance(DocumentUnits units)
+    {
+        var absolute = units.MetersPerDocumentUnit * 0.001;
+        return SurfaceNavigator.ClampSupportTolerance(absolute);
     }
 
     static void OnBeginCommand(object? sender, CommandEventArgs e)
@@ -563,6 +661,7 @@ public static class SessionController
 
     static void OnCloseDocument(object? sender, DocumentEventArgs e)
     {
+        GroundCacheBuilder.Clear(e.Document);
         if (!IsActive)
             return;
         if (e.Document.RuntimeSerialNumber != _docSerial)
@@ -581,6 +680,8 @@ public static class SessionController
 
     static void OnUnitsChanged(object? sender, UnitsChangedWithScalingEventArgs e)
     {
+        if (e.Document is not null)
+            GroundCacheBuilder.Invalidate(e.Document);
         if (!IsActive)
             return;
         if (e.Document is not null && e.Document.RuntimeSerialNumber != _docSerial)
@@ -599,6 +700,38 @@ public static class SessionController
         }
         if (System.Math.Abs(units.MetersPerDocumentUnit - _units.MetersPerDocumentUnit) > 1e-15)
             Exit(WalkExitKind.KeepView, "units-changed");
+    }
+
+    static void OnGeometryMutated(object? sender, RhinoObjectEventArgs e)
+    {
+        if (e.TheObject?.Document is { } doc)
+            InvalidateSupport(doc, "geometry");
+    }
+
+    static void OnGeometryReplace(object? sender, RhinoReplaceObjectEventArgs e)
+    {
+        if (e.Document is { } doc)
+            InvalidateSupport(doc, "geometry-replace");
+    }
+
+    static void OnAttributesChanged(object? sender, RhinoModifyObjectAttributesEventArgs e)
+    {
+        if (e.Document is { } doc)
+            InvalidateSupport(doc, "attributes");
+    }
+
+    static void OnLayerTableEvent(object? sender, Rhino.DocObjects.Tables.LayerTableEventArgs e)
+    {
+        if (e.Document is { } doc)
+            InvalidateSupport(doc, "layer");
+    }
+
+    static void InvalidateSupport(RhinoDoc doc, string reason)
+    {
+        GroundCacheBuilder.Invalidate(doc);
+        if (!IsActive || doc.RuntimeSerialNumber != _docSerial)
+            return;
+        Exit(WalkExitKind.KeepView, "support-invalidated:" + reason);
     }
 
     public static bool HandlePausedClick(RhinoView? view)

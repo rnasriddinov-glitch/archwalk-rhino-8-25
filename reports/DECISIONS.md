@@ -22,9 +22,12 @@ Started from `06_RESEARCH_AND_DECISIONS.md`. Confirmed on Rhino 8.25.25328.11001
 | I16 | P2 placement draft lives in `PlacementController`, not SessionState | Walk capture stays Idle until Enter; Esc clears draft with no Undo |
 | I17 | Live preview stays on owned floating `ARCHWALK_PREVIEW` view; panel shows `DrawToBitmap` | Same P0C path; working view unchanged |
 | I18 | WinForms `ObserverPanel` registered as Rhino panel «Наблюдатель» | Windows-only v1; Eto not required |
-| I19 | Default foot source in P2 UI is **По отметке**; Surface option probes ground meshes and refuses empty hits | Full surface walking remains P4 |
+| I19 | Default foot source in P2 UI is **По отметке**; Surface option probes ground and commits `MovementMode.Surface` | P2 placement; full follow in P4 |
 | I20 | Placement Enter/Готово commits one `ObserverRecord` before walk | Draft never writes Undo until confirm |
 | I21 | Named Views via `NamedViews.Add(name, viewportId)`; overwrite only with explicit Replace | P3-named-view |
 | I22 | Unit scale: multiply foot document coords by `UnitsChangedWithScaling.Scale`; keep `EyeHeightMeters` | P3-units-scale |
+| I23 | Surface follow: Core `ISupportField` + `SurfaceNavigator`; Rhino `GroundCache` XY grid + local `MeshRay` | P4 offline 48 tests |
+| I24 | Camera uses `MotionCore.RenderPose` (smoothed eye Z); support always from physical foot | P4 A34 |
+| I25 | Geometry/layer/attribute mutation ends walk and invalidates ground generation | P4 A38 |
 
 `RhinoDoc.Redo()` after custom undo on headless 8.25 returned false in-process. The swap callback is still implemented for command-scoped redo (P3).
