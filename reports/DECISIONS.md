@@ -32,5 +32,6 @@ Started from `06_RESEARCH_AND_DECISIONS.md`. Confirmed on Rhino 8.25.25328.11001
 | I26 | Local Yak `archwalk` Windows package; no public push from CI | P5 `packaging/Build-Yak.ps1` → `archwalk-1.0.0-rh8_25-win.yak` |
 | I27 | Session Idle handler unsubscribed on Exit/failed enter | P5 A55; no capture bridge or Idle work when Idle |
 | I28 | Clipping planes not applied to automatic ground in v1; use Level or explicit `GroundSupportFilter` | A40 documented limitation |
+| I29 | Plug-in Id requires `[assembly: Guid(...)]`; class-level Guid alone leaves `PlugIn.Id` empty on RegisterPanel | First install failure on 8.25 |
 
 `RhinoDoc.Redo()` after custom undo on headless 8.25 returned false in-process. The swap callback is still implemented for command-scoped redo (P3).

@@ -37,13 +37,20 @@ _PackageManager
 4. Пройдите `_AWPlace` → Enter → Esc: курсор свободен, нет захвата мыши.
 5. Отключите/удалите пакет (ниже) и перезапустите Rhino: команд `_AW*` нет, панель «Наблюдатель» не зарегистрирована, глобальные настройки Rhino не изменены.
 
-## Ручная установка `.rhp`
+## Ручная установка `.rhp` (первый запуск)
 
-1. Скопируйте в одну папку: `ArchWalk.rhp`, `ArchWalk.Core.dll`, `ArchWalk.WindowsInput.dll`.
-2. В Rhino: `_PlugInManager` → Install → выберите `ArchWalk.rhp`.
-3. Перезапустите Rhino.
+Используйте **только** эту папку (там есть assembly Guid — без него Rhino падает на панели):
 
-Не разносите DLL по разным каталогам: загрузчик ищет соседние сборки рядом с `.rhp`.
+`C:\Dev\ARCHWALK_Rhino_8_25\dist\install\ArchWalk.rhp`
+
+1. Закройте Rhino полностью.
+2. `_PlugInManager` → если ARCHWALK уже в списке — **Remove** / снимите галочку.
+3. Install → укажите файл выше (рядом должны лежать `ArchWalk.Core.dll` и `ArchWalk.WindowsInput.dll`).
+4. Перезапустите Rhino.
+5. В командной строке Rhino должно появиться: `ARCHWALK loaded Id=6f2e1c8a-...`
+6. `_AWPanel` — панель «Наблюдатель».
+
+Не ставьте из `bin\plugin\` — там могла остаться старая сборка без `[assembly: Guid]`.
 
 ## Удаление / отключение
 

@@ -10,3 +10,9 @@ TestResults/
 .idea/
 packaging/stage/
 
+
+src/_guidcheck/
+src/_guidcheck2/
+dist/install/*.pdb
+dist/install/*.deps.json
+dist/install/*.runtimeconfig.json

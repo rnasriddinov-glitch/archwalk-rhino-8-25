@@ -46,8 +46,45 @@ public sealed class ArchWalkPlugIn : PlugIn
 
     protected override LoadReturnCode OnLoad(ref string errorMessage)
     {
+        EnsurePlugInId();
+        if (Id == Guid.Empty)
+        {
+            errorMessage =
+                "ARCHWALK: PlugIn.Id is empty. Reinstall from dist\\install\\ArchWalk.rhp " +
+                "(assembly must have [assembly: Guid(\"" + IdString + "\")]). Loaded from: " +
+                (Assembly?.Location ?? "?");
+            return LoadReturnCode.ErrorShowDialog;
+        }
+
+        RhinoApp.WriteLine("ARCHWALK loaded Id=" + Id + " from " + (Assembly?.Location ?? "?"));
         Panels.RegisterPanel(this, typeof(ObserverPanel), "Наблюдатель", null);
         return LoadReturnCode.Success;
+    }
+
+    /// <summary>
+    /// Rhino sets <see cref="PlugIn.Id"/> from the assembly GuidAttribute in PlugIn.Create.
+    /// If an older build without that attribute still constructs, force the known Id before RegisterPanel.
+    /// </summary>
+    void EnsurePlugInId()
+    {
+        if (Id != Guid.Empty)
+            return;
+
+        var expected = new Guid(IdString);
+        try
+        {
+            var attrs = GetType().Assembly.GetCustomAttributes(typeof(System.Runtime.InteropServices.GuidAttribute), false);
+            if (attrs.Length > 0 && attrs[0] is System.Runtime.InteropServices.GuidAttribute ga &&
+                Guid.TryParse(ga.Value, out var fromAsm) && fromAsm != Guid.Empty)
+                expected = fromAsm;
+        }
+        catch
+        {
+            // keep IdString
+        }
+
+        var field = typeof(PlugIn).GetField("m_id", BindingFlags.Instance | BindingFlags.NonPublic);
+        field?.SetValue(this, expected);
     }
 
     protected override bool ShouldCallWriteDocument(FileWriteOptions options)
