@@ -1,10 +1,13 @@
 using System.Reflection;
 using ArchWalk.RhinoPlugin.Data;
 using ArchWalk.RhinoPlugin.Input;
+using ArchWalk.RhinoPlugin.Placement;
 using ArchWalk.RhinoPlugin.Session;
+using ArchWalk.RhinoPlugin.UI;
 using Rhino;
 using Rhino.FileIO;
 using Rhino.PlugIns;
+using Rhino.UI;
 
 namespace ArchWalk.RhinoPlugin;
 
@@ -24,15 +27,26 @@ public sealed class ArchWalkPlugIn : PlugIn
         SessionController.InstallHostHooks();
         RhinoDoc.CloseDocument += (_, e) =>
         {
+            PlacementController.Cancel("document-close");
             ObserverRepository.Remove(e.Document);
             InputSession.Release("document-close");
         };
-        RhinoApp.Closing += (_, _) => InputSession.Release("rhino-closing");
+        RhinoApp.Closing += (_, _) =>
+        {
+            PlacementController.Cancel("rhino-closing");
+            InputSession.Release("rhino-closing");
+        };
     }
 
     public static ArchWalkPlugIn Instance { get; private set; } = null!;
 
     public override PlugInLoadTime LoadTime => PlugInLoadTime.AtStartup;
+
+    protected override LoadReturnCode OnLoad(ref string errorMessage)
+    {
+        Panels.RegisterPanel(this, typeof(ObserverPanel), "Наблюдатель", null);
+        return LoadReturnCode.Success;
+    }
 
     protected override bool ShouldCallWriteDocument(FileWriteOptions options)
     {

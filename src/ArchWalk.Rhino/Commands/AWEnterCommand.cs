@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using ArchWalk.Core.Motion;
 using ArchWalk.RhinoPlugin.Camera;
+using ArchWalk.RhinoPlugin.Placement;
 using ArchWalk.RhinoPlugin.Session;
 using Rhino;
 using Rhino.Commands;
@@ -17,12 +18,17 @@ public sealed class AWEnterCommand : Command
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
+        if (PlacementController.Draft.IsReady)
+        {
+            return PlacementController.TryEnter(doc, deferCapture: true, out var message)
+                ? Result.Success
+                : Fail(message);
+        }
+
+        // Keep P1 direct enter path for scripted/host use and Fly/RMB options.
         var view = doc.Views.ActiveView;
         if (view is null)
-        {
-            RhinoApp.WriteLine("ARCHWALK: нет активного вида.");
-            return Result.Failure;
-        }
+            return Fail("нет активного вида.");
 
         var movement = MovementMode.Level;
         var look = MouseLookProfile.FreeLook;
@@ -30,9 +36,10 @@ public sealed class AWEnterCommand : Command
         gp.SetCommandPrompt("ARCHWALK: точка ног (По отметке)");
         var flyOpt = gp.AddOption("Fly");
         var rmbOpt = gp.AddOption("RightButton");
+        var placeOpt = gp.AddOption("Place");
         gp.DynamicDraw += (_, e) =>
         {
-            if (!RhinoUnits.TryFromDoc(doc, out var units, out var unusedError))
+            if (!RhinoUnits.TryFromDoc(doc, out var units, out string? _))
                 return;
             var top = e.CurrentPoint + (Vector3d.ZAxis * units.ToDocument(MotionDefaults.EyeHeightMeters));
             e.Display.DrawLine(e.CurrentPoint, top, System.Drawing.Color.Gold);
@@ -44,6 +51,12 @@ public sealed class AWEnterCommand : Command
             var result = gp.Get();
             if (result == GetResult.Option && gp.Option() is not null)
             {
+                if (gp.Option()!.Index == placeOpt)
+                {
+                    RhinoApp.WriteLine("ARCHWALK: запустите _AWPlace или кнопку панели.");
+                    return Result.Cancel;
+                }
+
                 if (gp.Option()!.Index == flyOpt)
                     movement = movement == MovementMode.Fly ? MovementMode.Level : MovementMode.Fly;
                 else if (gp.Option()!.Index == rmbOpt)
@@ -64,5 +77,11 @@ public sealed class AWEnterCommand : Command
         return SessionController.EnterAtDocumentPoint(doc, view, gp.Point(), yaw, movement, look, deferCapture: true)
             ? Result.Success
             : Result.Failure;
+    }
+
+    static Result Fail(string message)
+    {
+        RhinoApp.WriteLine("ARCHWALK: " + message);
+        return Result.Failure;
     }
 }

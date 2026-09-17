@@ -19,5 +19,9 @@ Started from `06_RESEARCH_AND_DECISIONS.md`. Confirmed on Rhino 8.25.25328.11001
 | I13 | `AWEnter` defers capture until Idle after the command | Matches 01: hide cursor only after the launching command ends |
 | I14 | Ctrl+S / Ctrl+Z: do not eat the chord; end keep-view; then `_Save` / `_Undo` (tests set `SuppressHostScripts`) | Spec exception vs WASD suppression; host tests do not open the Save dialog |
 | I15 | Right-button profile: relative look only while RMB is held; cursor leaving the view pauses | P1-rmb; live context-menu check remaining after restart |
+| I16 | P2 placement draft lives in `PlacementController`, not SessionState | Walk capture stays Idle until Enter; Esc clears draft with no Undo |
+| I17 | Live preview stays on owned floating `ARCHWALK_PREVIEW` view; panel shows `DrawToBitmap` | Same P0C path; working view unchanged |
+| I18 | WinForms `ObserverPanel` registered as Rhino panel «Наблюдатель» | Windows-only v1; Eto not required |
+| I19 | Default foot source in P2 UI is **По отметке**; Surface option probes ground meshes and refuses empty hits | Full surface walking remains P4 |
 
 `RhinoDoc.Redo()` after custom undo on headless 8.25 returned false in-process. The swap callback is still implemented for command-scoped redo (P3).

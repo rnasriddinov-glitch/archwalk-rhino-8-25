@@ -17,9 +17,9 @@ public static class SessionController
 {
     static readonly HashSet<string> OwnCommands =
     [
-        "AWEnter", "AWExit", "AWReturn", "AWResetInput",
+        "AWEnter", "AWExit", "AWReturn", "AWResetInput", "AWPlace", "AWPanel",
         "AWP0Input", "AWP0Camera", "AWP0Preview", "AWP0Data", "AWP0Ground", "AWP0RunHostTests",
-        "AWP1RunHostTests"
+        "AWP1RunHostTests", "AWP2RunHostTests"
     ];
 
     static readonly object Gate = new();
