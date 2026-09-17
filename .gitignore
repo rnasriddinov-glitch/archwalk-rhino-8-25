@@ -8,3 +8,5 @@ TestResults/
 *.3dm.bak
 *.3dmbak
 .idea/
+packaging/stage/
+

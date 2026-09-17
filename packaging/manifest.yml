@@ -1,0 +1,13 @@
+name: archwalk
+version: 1.0.0
+authors:
+  - ARCHWALK
+description: Architectural first-person observer placement and walk for Rhino 8.25 (Windows).
+url: https://github.com/rnasriddinov-glitch/archwalk-rhino-8-25
+keywords:
+  - architecture
+  - camera
+  - walk
+  - observer
+  - fps
+icon: null

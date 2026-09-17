@@ -22,7 +22,8 @@ public static class SessionController
     [
         "AWEnter", "AWExit", "AWReturn", "AWResetInput", "AWPlace", "AWPanel", "AWSaveView",
         "AWP0Input", "AWP0Camera", "AWP0Preview", "AWP0Data", "AWP0Ground", "AWP0RunHostTests",
-        "AWP1RunHostTests", "AWP2RunHostTests", "AWP3RunHostTests", "AWP4RunHostTests"
+        "AWP1RunHostTests", "AWP2RunHostTests", "AWP3RunHostTests", "AWP4RunHostTests",
+        "AWP5RunHostTests"
     ];
 
     static readonly object Gate = new();
@@ -64,6 +65,8 @@ public static class SessionController
     public static GroundCache? ActiveGround => _ground;
 
     public static bool IsActive => State is SessionState.Captured or SessionState.Paused or SessionState.EnterPending;
+    public static bool IdleHooked => _idleHooked;
+    public static bool HasCaptureBridge => _bridge is not null;
 
     public static void InstallHostHooks()
     {
@@ -248,6 +251,7 @@ public static class SessionController
         _pendingCapture = false;
         _resumeArmed = false;
         _core?.HardStop();
+        DrainQueue();
         DetachBridge();
         DisableHud();
 
@@ -275,6 +279,7 @@ public static class SessionController
         }
 
         State = SessionState.Idle;
+        ReleaseIdle();
         ArchWalk.RhinoPlugin.Observers.ObserverWorkflow.ClearSessionRecord();
         RhinoApp.WriteLine("ARCHWALK выход (" + kind + "): " + reason);
     }
@@ -328,6 +333,14 @@ public static class SessionController
             return;
         RhinoApp.Idle += OnIdle;
         _idleHooked = true;
+    }
+
+    static void ReleaseIdle()
+    {
+        if (!_idleHooked)
+            return;
+        RhinoApp.Idle -= OnIdle;
+        _idleHooked = false;
     }
 
     static void OnIdle(object? sender, EventArgs e)
@@ -596,6 +609,7 @@ public static class SessionController
         DisableHud();
         ClearSessionFields();
         State = SessionState.Idle;
+        ReleaseIdle();
         if (view is not null && snapshot is not null && view.Handle != IntPtr.Zero)
             CameraAdapter.Restore(view.MainViewport, snapshot);
     }

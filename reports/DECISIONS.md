@@ -29,5 +29,8 @@ Started from `06_RESEARCH_AND_DECISIONS.md`. Confirmed on Rhino 8.25.25328.11001
 | I23 | Surface follow: Core `ISupportField` + `SurfaceNavigator`; Rhino `GroundCache` XY grid + local `MeshRay` | P4 offline 48 tests |
 | I24 | Camera uses `MotionCore.RenderPose` (smoothed eye Z); support always from physical foot | P4 A34 |
 | I25 | Geometry/layer/attribute mutation ends walk and invalidates ground generation | P4 A38 |
+| I26 | Local Yak `archwalk` Windows package; no public push from CI | P5 `packaging/Build-Yak.ps1` → `archwalk-1.0.0-rh8_25-win.yak` |
+| I27 | Session Idle handler unsubscribed on Exit/failed enter | P5 A55; no capture bridge or Idle work when Idle |
+| I28 | Clipping planes not applied to automatic ground in v1; use Level or explicit `GroundSupportFilter` | A40 documented limitation |
 
 `RhinoDoc.Redo()` after custom undo on headless 8.25 returned false in-process. The swap callback is still implemented for command-scoped redo (P3).

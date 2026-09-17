@@ -8,9 +8,18 @@
     <UseWindowsForms>true</UseWindowsForms>
     <UseWPF>false</UseWPF>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-    <Version>0.5.0</Version>
-    <AssemblyVersion>0.5.0.0</AssemblyVersion>
-    <FileVersion>0.5.0.0</FileVersion>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <InformationalVersion>1.0.0</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <AssemblyTitle>ARCHWALK</AssemblyTitle>
+    <Description>Architectural first-person observer placement and walk for Rhino 8.25 Windows.</Description>
+    <Authors>ARCHWALK</Authors>
+    <Company>ARCHWALK</Company>
+    <Product>ARCHWALK</Product>
+    <Copyright>Copyright (c) ARCHWALK</Copyright>
+    <PackageProjectUrl>https://github.com/rnasriddinov-glitch/archwalk-rhino-8-25</PackageProjectUrl>
     <AppendTargetFrameworkToOutputPath>true</AppendTargetFrameworkToOutputPath>
     <OutputPath>bin\plugin\</OutputPath>
     <NoWarn>$(NoWarn);NU1701</NoWarn>
