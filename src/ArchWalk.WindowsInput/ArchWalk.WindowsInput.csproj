@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>ArchWalk.WindowsInput</RootNamespace>
+    <AssemblyName>ArchWalk.WindowsInput</AssemblyName>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Description>Windows UI-thread input capture for ARCHWALK. No Raw Input registration.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ArchWalk.Core\ArchWalk.Core.csproj" />
+  </ItemGroup>
+</Project>

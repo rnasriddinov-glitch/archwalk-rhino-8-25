@@ -1,0 +1,10 @@
+[Bb]in/
+[Oo]bj/
+.vs/
+*.user
+*.suo
+*.userosscache
+TestResults/
+*.3dm.bak
+*.3dmbak
+.idea/

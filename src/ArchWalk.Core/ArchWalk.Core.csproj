@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>ArchWalk.Core</RootNamespace>
+    <AssemblyName>ArchWalk.Core</AssemblyName>
+    <Description>Rhino-independent ARCHWALK math, units, pose and motion.</Description>
+  </PropertyGroup>
+</Project>

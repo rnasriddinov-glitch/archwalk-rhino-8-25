@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <Version>0.2.0-p1</Version>
+    <Authors>ARCHWALK</Authors>
+    <Product>ARCHWALK</Product>
+    <NeutralLanguage>ru</NeutralLanguage>
+    <RhinoCommonVersion>8.25.25328.11001</RhinoCommonVersion>
+  </PropertyGroup>
+</Project>

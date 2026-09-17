@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>ArchWalk.RhinoPlugin</RootNamespace>
+    <AssemblyName>ArchWalk</AssemblyName>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <TargetExt>.rhp</TargetExt>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>false</UseWPF>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <Version>0.2.0</Version>
+    <AssemblyVersion>0.2.0.0</AssemblyVersion>
+    <FileVersion>0.2.0.0</FileVersion>
+    <AppendTargetFrameworkToOutputPath>true</AppendTargetFrameworkToOutputPath>
+    <OutputPath>bin\plugin\</OutputPath>
+    <NoWarn>$(NoWarn);NU1701</NoWarn>
+    <StartAction>Program</StartAction>
+    <StartProgram>C:\Program Files\Rhino 825\System\Rhino.exe</StartProgram>
+    <StartWorkingDirectory>$(MSBuildProjectDirectory)</StartWorkingDirectory>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="RhinoCommon" Version="$(RhinoCommonVersion)" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ArchWalk.Core\ArchWalk.Core.csproj" />
+    <ProjectReference Include="..\ArchWalk.WindowsInput\ArchWalk.WindowsInput.csproj" />
+  </ItemGroup>
+</Project>
