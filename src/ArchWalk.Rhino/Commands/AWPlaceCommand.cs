@@ -1,6 +1,8 @@
 using System.Runtime.InteropServices;
+using ArchWalk.Core.Motion;
 using ArchWalk.RhinoPlugin.Placement;
 using ArchWalk.RhinoPlugin.Session;
+using ArchWalk.RhinoPlugin.Settings;
 using Rhino;
 using Rhino.Commands;
 using Rhino.Input;
@@ -75,6 +77,10 @@ public sealed class AWPlaceCommand : Command
         var gp = new GetPoint();
         var levelOpt = gp.AddOption("Level");
         var surfaceOpt = gp.AddOption("Surface");
+        var heightMm = new OptionDouble(WalkUserSettings.EyeHeightMeters * 1000.0, 300, 2500);
+        var speed = new OptionDouble(WalkUserSettings.BaseSpeedMetersPerSecond, 0.1, 6.0);
+        gp.AddOptionDouble("EyeHeight", ref heightMm);
+        gp.AddOptionDouble("Speed", ref speed);
         gp.DynamicDraw += (_, e) => PlacementController.DrawDynamic(doc, e.Display, e.CurrentPoint);
 
         while (true)
@@ -88,16 +94,19 @@ public sealed class AWPlaceCommand : Command
                 return false;
             if (result == GetResult.Option && gp.Option() is not null)
             {
-                if (gp.Option()!.Index == levelOpt)
+                var index = gp.Option()!.Index;
+                if (index == levelOpt)
                 {
                     footSource = FootSourceKind.Level;
                     PlacementController.SetFootSource(FootSourceKind.Level);
                 }
-                else if (gp.Option()!.Index == surfaceOpt)
+                else if (index == surfaceOpt)
                 {
                     footSource = FootSourceKind.Surface;
                     PlacementController.SetFootSource(FootSourceKind.Surface);
                 }
+                else
+                    ApplyCommandOptions(heightMm, speed);
                 continue;
             }
 
@@ -124,6 +133,10 @@ public sealed class AWPlaceCommand : Command
             ? "ARCHWALK: точка взгляда 3D"
             : "ARCHWALK: направление взгляда (горизонтально)");
         var lookOpt = gp.AddOption("LookAt3D");
+        var heightMm = new OptionDouble(WalkUserSettings.EyeHeightMeters * 1000.0, 300, 2500);
+        var speed = new OptionDouble(WalkUserSettings.BaseSpeedMetersPerSecond, 0.1, 6.0);
+        gp.AddOptionDouble("EyeHeight", ref heightMm);
+        gp.AddOptionDouble("Speed", ref speed);
         if (!lookAt3D)
             gp.Constrain(new Rhino.Geometry.Plane(foot, Rhino.Geometry.Vector3d.ZAxis), false);
         gp.DynamicDraw += (_, e) =>
@@ -137,16 +150,22 @@ public sealed class AWPlaceCommand : Command
             var result = gp.Get();
             if (result == GetResult.Cancel)
                 return false;
-            if (result == GetResult.Option && gp.Option() is not null && gp.Option()!.Index == lookOpt)
+            if (result == GetResult.Option && gp.Option() is not null)
             {
-                lookAt3D = !lookAt3D;
-                PlacementController.SetLookAt3D(lookAt3D);
-                gp.ClearConstraints();
-                if (!lookAt3D)
-                    gp.Constrain(new Rhino.Geometry.Plane(foot, Rhino.Geometry.Vector3d.ZAxis), false);
-                gp.SetCommandPrompt(lookAt3D
-                    ? "ARCHWALK: точка взгляда 3D"
-                    : "ARCHWALK: направление взгляда (горизонтально)");
+                var index = gp.Option()!.Index;
+                if (index == lookOpt)
+                {
+                    lookAt3D = !lookAt3D;
+                    PlacementController.SetLookAt3D(lookAt3D);
+                    gp.ClearConstraints();
+                    if (!lookAt3D)
+                        gp.Constrain(new Rhino.Geometry.Plane(foot, Rhino.Geometry.Vector3d.ZAxis), false);
+                    gp.SetCommandPrompt(lookAt3D
+                        ? "ARCHWALK: точка взгляда 3D"
+                        : "ARCHWALK: направление взгляда (горизонтально)");
+                }
+                else
+                    ApplyCommandOptions(heightMm, speed);
                 continue;
             }
 
@@ -161,5 +180,17 @@ public sealed class AWPlaceCommand : Command
 
             return true;
         }
+    }
+
+    internal static void ApplyCommandOptions(OptionDouble heightMm, OptionDouble speed)
+    {
+        var h = WalkSettings.ClampEyeHeight(heightMm.CurrentValue / 1000.0);
+        var v = WalkSettings.ClampBaseSpeed(speed.CurrentValue);
+        WalkUserSettings.Set(h, v);
+        PlacementController.SetEyeHeight(h);
+        PlacementController.SetBaseSpeed(v);
+        RhinoApp.WriteLine(
+            "ARCHWALK: H=" + WalkSettings.FormatEyeHeightMillimetres(h) + " мм, v=" +
+            WalkSettings.FormatBaseSpeed(v) + " м/с");
     }
 }

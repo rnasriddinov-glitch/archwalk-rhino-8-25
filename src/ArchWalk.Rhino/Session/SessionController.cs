@@ -103,7 +103,8 @@ public static class SessionController
         CameraPose pose,
         MovementMode mode,
         MouseLookProfile look,
-        bool deferCapture)
+        bool deferCapture,
+        double? baseSpeedMetersPerSecond = null)
     {
         if (!RhinoUnits.TryFromDoc(doc, out var units, out var error))
         {
@@ -142,6 +143,9 @@ public static class SessionController
             pose = pose.WithFoot(snapped);
         }
 
+        var speed = baseSpeedMetersPerSecond
+            ?? ArchWalk.RhinoPlugin.Settings.WalkUserSettings.BaseSpeedMetersPerSecond;
+
         State = SessionState.EnterPending;
         _view = view;
         _doc = doc;
@@ -158,7 +162,7 @@ public static class SessionController
         _core = new MotionCore(
             pose,
             mode,
-            MotionDefaults.BaseSpeedMetersPerSecond,
+            speed,
             support,
             SupportTolerance(units),
             eyeSmoothing: mode == MovementMode.Surface);
@@ -203,11 +207,29 @@ public static class SessionController
             units.ToMeters(footDocument.X),
             units.ToMeters(footDocument.Y),
             units.ToMeters(footDocument.Z),
-            MotionDefaults.EyeHeightMeters,
+            ArchWalk.RhinoPlugin.Settings.WalkUserSettings.EyeHeightMeters,
             yawRadians,
             0,
             MotionDefaults.VerticalFovRadians);
-        return Enter(doc, view, pose, mode, look, deferCapture);
+        return Enter(
+            doc,
+            view,
+            pose,
+            mode,
+            look,
+            deferCapture,
+            ArchWalk.RhinoPlugin.Settings.WalkUserSettings.BaseSpeedMetersPerSecond);
+    }
+
+    /// <summary>Apply height and speed to the live walk without moving feet.</summary>
+    public static void ApplyHeightAndSpeed(double eyeHeightMeters, double baseSpeedMetersPerSecond)
+    {
+        if (_core is null)
+            return;
+        _core.SetEyeHeight(eyeHeightMeters);
+        _core.SetBaseSpeed(baseSpeedMetersPerSecond);
+        TryApplyCamera();
+        UpdateHud();
     }
 
     public static void Pause(string reason)

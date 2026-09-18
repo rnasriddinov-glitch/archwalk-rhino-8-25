@@ -42,6 +42,7 @@ public sealed class PlacementDraft
     public double YawRadians { get; set; }
     public double PitchRadians { get; set; }
     public double EyeHeightMeters { get; set; } = MotionDefaults.EyeHeightMeters;
+    public double BaseSpeedMetersPerSecond { get; set; } = MotionDefaults.BaseSpeedMetersPerSecond;
     public double VerticalFovRadians { get; set; } = MotionDefaults.VerticalFovRadians;
     public double AspectWidthOverHeight { get; set; } = 16.0 / 9.0;
 
@@ -82,6 +83,7 @@ public sealed class PlacementDraft
         YawRadians = YawRadians,
         PitchRadians = PitchRadians,
         EyeHeightMeters = EyeHeightMeters,
+        BaseSpeedMetersPerSecond = BaseSpeedMetersPerSecond,
         VerticalFovRadians = VerticalFovRadians,
         AspectWidthOverHeight = AspectWidthOverHeight,
         MovementMode = MovementMode,

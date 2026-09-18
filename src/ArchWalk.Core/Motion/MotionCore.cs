@@ -164,6 +164,14 @@ public sealed class MotionCore
 
     public void SetBaseSpeed(double metersPerSecond) => _baseSpeed = ClampSpeed(metersPerSecond);
 
+    /// <summary>Change eye height; foot position stays fixed. Display eye Z snaps to the new height.</summary>
+    public void SetEyeHeight(double meters)
+    {
+        var h = WalkSettings.ClampEyeHeight(meters);
+        _pose = _pose with { EyeHeightMeters = h };
+        _displayEyeZ = _pose.EyeMeters.Z;
+    }
+
     public MotionStepResult Advance(double elapsedSeconds, in InputIntent intent)
     {
         ApplyLook(intent);

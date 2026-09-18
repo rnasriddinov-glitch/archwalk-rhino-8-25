@@ -3,6 +3,7 @@ using ArchWalk.Core.Motion;
 using ArchWalk.RhinoPlugin.Camera;
 using ArchWalk.RhinoPlugin.Placement;
 using ArchWalk.RhinoPlugin.Session;
+using ArchWalk.RhinoPlugin.Settings;
 using Rhino;
 using Rhino.Commands;
 using Rhino.Geometry;
@@ -45,11 +46,15 @@ public sealed class AWEnterCommand : Command
         var flyOpt = gp.AddOption("Fly");
         var rmbOpt = gp.AddOption("RightButton");
         var placeOpt = gp.AddOption("Place");
+        var heightMm = new OptionDouble(WalkUserSettings.EyeHeightMeters * 1000.0, 300, 2500);
+        var speed = new OptionDouble(WalkUserSettings.BaseSpeedMetersPerSecond, 0.1, 6.0);
+        gp.AddOptionDouble("EyeHeight", ref heightMm);
+        gp.AddOptionDouble("Speed", ref speed);
         gp.DynamicDraw += (_, e) =>
         {
             if (!RhinoUnits.TryFromDoc(doc, out var units, out string? _))
                 return;
-            var top = e.CurrentPoint + (Vector3d.ZAxis * units.ToDocument(MotionDefaults.EyeHeightMeters));
+            var top = e.CurrentPoint + (Vector3d.ZAxis * units.ToDocument(WalkUserSettings.EyeHeightMeters));
             e.Display.DrawLine(e.CurrentPoint, top, System.Drawing.Color.Gold);
             e.Display.DrawPoint(e.CurrentPoint, System.Drawing.Color.Gold);
         };
@@ -59,16 +64,20 @@ public sealed class AWEnterCommand : Command
             var result = gp.Get();
             if (result == GetResult.Option && gp.Option() is not null)
             {
-                if (gp.Option()!.Index == placeOpt)
+                var index = gp.Option()!.Index;
+                if (index == placeOpt)
                 {
                     RhinoApp.WriteLine("ARCHWALK: запустите _AWPlace или кнопку панели.");
                     return Result.Cancel;
                 }
 
-                if (gp.Option()!.Index == flyOpt)
+                if (index == flyOpt)
                     movement = movement == MovementMode.Fly ? MovementMode.Level : MovementMode.Fly;
-                else if (gp.Option()!.Index == rmbOpt)
+                else if (index == rmbOpt)
                     look = look == MouseLookProfile.RightButton ? MouseLookProfile.FreeLook : MouseLookProfile.RightButton;
+                else
+                    AWPlaceCommand.ApplyCommandOptions(heightMm, speed);
+
                 gp.SetCommandPrompt(
                     "ARCHWALK: точка ног  [" +
                     (movement == MovementMode.Fly ? "Полёт" : "По отметке") + ", " +
