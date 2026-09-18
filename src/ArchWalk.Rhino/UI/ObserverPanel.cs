@@ -7,6 +7,7 @@ using ArchWalk.RhinoPlugin.Data;
 using ArchWalk.RhinoPlugin.Observers;
 using ArchWalk.RhinoPlugin.Placement;
 using ArchWalk.RhinoPlugin.Session;
+using ArchWalk.RhinoPlugin.Settings;
 using Rhino;
 using Rhino.UI;
 
@@ -27,6 +28,9 @@ public sealed class ObserverPanel : UserControl, IPanel
     readonly Label _previewCaption;
     readonly ListBox _list;
     readonly TextBox _rename;
+    readonly TextBox _heightBox;
+    readonly TextBox _speedBox;
+    readonly Label _settingsCaption;
     readonly Button _place;
     readonly Button _enter;
     readonly Button _done;
@@ -40,6 +44,7 @@ public sealed class ObserverPanel : UserControl, IPanel
     readonly Button _saveView;
     readonly Button _renameApply;
     bool _suppressEvents;
+    bool _settingsDirty;
 
     public ObserverPanel()
     {
@@ -57,6 +62,52 @@ public sealed class ObserverPanel : UserControl, IPanel
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
+        _settingsCaption = new Label
+        {
+            Text = "Высота и скорость — для всех наблюдателей в этом файле",
+            AutoSize = true,
+            MaximumSize = new Size(360, 0),
+            Margin = new Padding(0, 0, 0, 4)
+        };
+
+        var settingsRow = new TableLayoutPanel
+        {
+            ColumnCount = 4,
+            AutoSize = true,
+            Dock = DockStyle.Top,
+            Margin = new Padding(0, 0, 0, 10)
+        };
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        settingsRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+
+        settingsRow.Controls.Add(new Label
+        {
+            Text = "Высота глаз, мм",
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0, 6, 6, 0)
+        }, 0, 0);
+        _heightBox = new TextBox { Dock = DockStyle.Fill, Margin = new Padding(0, 2, 12, 2) };
+        _heightBox.Leave += OnSettingsCommit;
+        _heightBox.KeyDown += OnSettingsKeyDown;
+        _heightBox.TextChanged += (_, _) => { if (!_suppressEvents) _settingsDirty = true; };
+        settingsRow.Controls.Add(_heightBox, 1, 0);
+
+        settingsRow.Controls.Add(new Label
+        {
+            Text = "Скорость, м/с",
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0, 6, 6, 0)
+        }, 2, 0);
+        _speedBox = new TextBox { Dock = DockStyle.Fill, Margin = new Padding(0, 2, 0, 2) };
+        _speedBox.Leave += OnSettingsCommit;
+        _speedBox.KeyDown += OnSettingsKeyDown;
+        _speedBox.TextChanged += (_, _) => { if (!_suppressEvents) _settingsDirty = true; };
+        settingsRow.Controls.Add(_speedBox, 3, 0);
+
         var title = new Label
         {
             Text = "Наблюдатель",
@@ -67,7 +118,7 @@ public sealed class ObserverPanel : UserControl, IPanel
 
         _hint = new Label
         {
-            Text = "Кликните место, затем направление взгляда. Высота 1550 мм, скорость 1,3 м/с.",
+            Text = "Кликните место, затем направление взгляда.",
             AutoSize = true,
             MaximumSize = new Size(340, 0),
             Margin = new Padding(0, 0, 0, 8)
@@ -129,6 +180,8 @@ public sealed class ObserverPanel : UserControl, IPanel
         _saveView = MakeButton("Сохранить вид Rhino", OnSaveView);
         row.Controls.AddRange([_enter, _done, _editFoot, _editAim, _cancel, _update, _newHere, _dup, _delete, _saveView]);
 
+        root.Controls.Add(_settingsCaption);
+        root.Controls.Add(settingsRow);
         root.Controls.Add(title);
         root.Controls.Add(_hint);
         root.Controls.Add(_place);
@@ -148,11 +201,13 @@ public sealed class ObserverPanel : UserControl, IPanel
         PlacementController.Changed += OnPlacementChanged;
         ObserverRepository.Changed += OnRepoChanged;
         ObserverWorkflow.UiChanged += OnPlacementChanged;
+        WalkUserSettings.Changed += OnPlacementChanged;
         HandleDestroyed += (_, _) =>
         {
             PlacementController.Changed -= OnPlacementChanged;
             ObserverRepository.Changed -= OnRepoChanged;
             ObserverWorkflow.UiChanged -= OnPlacementChanged;
+            WalkUserSettings.Changed -= OnPlacementChanged;
         };
         Load += (_, _) =>
         {
@@ -189,6 +244,79 @@ public sealed class ObserverPanel : UserControl, IPanel
         BeginInvoke(RefreshUi);
     }
 
+    void OnSettingsKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyCode != Keys.Enter)
+            return;
+        e.SuppressKeyPress = true;
+        CommitSettingsFromPanel();
+    }
+
+    void OnSettingsCommit(object? sender, EventArgs e) => CommitSettingsFromPanel();
+
+    void CommitSettingsFromPanel()
+    {
+        if (_suppressEvents || !_settingsDirty)
+            return;
+
+        var doc = RhinoDoc.ActiveDoc;
+        if (doc is not null && ObserverRepository.IsWriteForbidden(doc))
+        {
+            _status.Text = "Неизвестная схема данных — запись в 3dm заблокирована";
+            SyncSettingsFields();
+            return;
+        }
+
+        if (!WalkSettings.TryParseEyeHeight(_heightBox.Text, out var height))
+        {
+            _status.Text = "Высота: введите 300–2500 мм или 0,30–2,50 м";
+            SyncSettingsFields();
+            return;
+        }
+
+        if (!WalkSettings.TryParseBaseSpeed(_speedBox.Text, out var speed))
+        {
+            _status.Text = "Скорость: введите 0,1–6,0 м/с";
+            SyncSettingsFields();
+            return;
+        }
+
+        WalkUserSettings.Set(height, speed);
+        PlacementController.SetEyeHeight(height);
+        PlacementController.SetBaseSpeed(speed);
+
+        if (doc is not null)
+        {
+            ObserverRepository.ApplyHeightAndSpeedToAll(doc, height, speed);
+            ObserverWorkflow.EnsureMarkers(doc, true);
+        }
+
+        if (SessionController.IsActive)
+            SessionController.ApplyHeightAndSpeed(height, speed);
+
+        _settingsDirty = false;
+        var applied =
+            "Применено ко всем: H=" + WalkSettings.FormatEyeHeightMillimetres(height) +
+            " мм, v=" + WalkSettings.FormatBaseSpeed(speed) + " м/с";
+        RefreshUi();
+        _status.Text = applied;
+    }
+
+    void SyncSettingsFields()
+    {
+        _suppressEvents = true;
+        try
+        {
+            _heightBox.Text = WalkSettings.FormatEyeHeightMillimetres(WalkUserSettings.EyeHeightMeters);
+            _speedBox.Text = WalkSettings.FormatBaseSpeed(WalkUserSettings.BaseSpeedMetersPerSecond);
+            _settingsDirty = false;
+        }
+        finally
+        {
+            _suppressEvents = false;
+        }
+    }
+
     void RefreshUi()
     {
         if (IsDisposed) return;
@@ -206,6 +334,15 @@ public sealed class ObserverPanel : UserControl, IPanel
                 : draft.StatusMessage;
             if (doc is not null && ObserverRepository.IsWriteForbidden(doc))
                 _status.Text = "Неизвестная схема данных — запись в 3dm заблокирована";
+
+            var writeOk = doc is null || !ObserverRepository.IsWriteForbidden(doc);
+            _heightBox.ReadOnly = !writeOk;
+            _speedBox.ReadOnly = !writeOk;
+            if (!_settingsDirty)
+            {
+                _heightBox.Text = WalkSettings.FormatEyeHeightMillimetres(WalkUserSettings.EyeHeightMeters);
+                _speedBox.Text = WalkSettings.FormatBaseSpeed(WalkUserSettings.BaseSpeedMetersPerSecond);
+            }
 
             _lookAt3D.Checked = draft.LookAt3D;
             _enter.Enabled = (draft.IsReady || ObserverWorkflow.SelectedId != Guid.Empty) && !SessionController.IsActive;

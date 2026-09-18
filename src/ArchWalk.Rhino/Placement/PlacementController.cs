@@ -7,6 +7,7 @@ using ArchWalk.RhinoPlugin.Camera;
 using ArchWalk.RhinoPlugin.Ground;
 using ArchWalk.RhinoPlugin.Preview;
 using ArchWalk.RhinoPlugin.Session;
+using ArchWalk.RhinoPlugin.Settings;
 using Rhino;
 using Rhino.Display;
 using Rhino.Geometry;
@@ -25,8 +26,15 @@ public static class PlacementController
     static DateTime _lastPreviewUtc = DateTime.MinValue;
     static double _lastLevelZDocument;
     static bool _hasLevelHint;
+    static int _displayPass;
+    static bool _previewPosted;
+    static RhinoDoc? _pendingPreviewDoc;
+    static bool _pendingPreviewForce;
+    static System.Windows.Forms.Timer? _previewPump;
 
     public static event Action? Changed;
+
+    public static IDisposable EnterDisplayPass() => new DisplayPassScope();
 
     public static PlacementDraft Draft
     {
@@ -84,6 +92,8 @@ public static class PlacementController
                 CreateNewTargetView = target.CreateNew,
                 TargetLabel = target.Label,
                 AspectWidthOverHeight = target.AspectWidthOverHeight,
+                EyeHeightMeters = WalkUserSettings.EyeHeightMeters,
+                BaseSpeedMetersPerSecond = WalkUserSettings.BaseSpeedMetersPerSecond,
                 LevelHintZDocument = _hasLevelHint ? _lastLevelZDocument : sourceView.MainViewport.ConstructionPlane().OriginZ,
                 StatusMessage = footSource == FootSourceKind.Level
                     ? "Кликните место у ног (По отметке)"
@@ -123,6 +133,24 @@ public static class PlacementController
             _draft.LookAt3D = enabled;
             if (!enabled)
                 _draft.PitchRadians = 0;
+        }
+        RaiseChanged();
+    }
+
+    public static void SetEyeHeight(double meters)
+    {
+        lock (Gate)
+        {
+            _draft.EyeHeightMeters = WalkSettings.ClampEyeHeight(meters);
+        }
+        RaiseChanged();
+    }
+
+    public static void SetBaseSpeed(double metersPerSecond)
+    {
+        lock (Gate)
+        {
+            _draft.BaseSpeedMetersPerSecond = WalkSettings.ClampBaseSpeed(metersPerSecond);
         }
         RaiseChanged();
     }
@@ -422,34 +450,16 @@ public static class PlacementController
 
     public static void RequestPreview(RhinoDoc doc, bool force)
     {
-        if (!RhinoUnits.TryFromDoc(doc, out var units, out _))
+        if (_displayPass > 0)
+        {
+            // DrawToBitmap from GetPoint.DynamicDraw presents into the working view.
+            _pendingPreviewDoc = doc;
+            _pendingPreviewForce |= force;
+            PostPreviewCapture();
             return;
-
-        CameraPose pose;
-        double aspect;
-        lock (Gate)
-        {
-            if (_draft.Phase is PlacementPhase.Idle or PlacementPhase.PlacingFoot)
-                return;
-            if (!force && (DateTime.UtcNow - _lastPreviewUtc).TotalMilliseconds < 100)
-                return;
-            pose = _draft.ToPose(units);
-            aspect = _draft.AspectWidthOverHeight;
-            _lastPreviewUtc = DateTime.UtcNow;
         }
 
-        var width = 360;
-        var height = Math.Max(100, (int)Math.Round(width / Math.Max(0.2, aspect)));
-        _preview ??= new PreviewRenderer();
-        var frame = _preview.CaptureFrame(doc, pose, units, width, height);
-        lock (Gate)
-        {
-            _lastFrame?.Dispose();
-            _lastFrame = frame;
-            if (frame is not null)
-                _previewGeneration++;
-        }
-        RaiseChanged();
+        CapturePreview(doc, force);
     }
 
     public static void DrawDynamic(RhinoDoc doc, DisplayPipeline display, Point3d cursor)
@@ -483,12 +493,94 @@ public static class PlacementController
         }
     }
 
+    static void CapturePreview(RhinoDoc doc, bool force)
+    {
+        if (!RhinoUnits.TryFromDoc(doc, out var units, out _))
+            return;
+
+        CameraPose pose;
+        double aspect;
+        lock (Gate)
+        {
+            if (_draft.Phase is PlacementPhase.Idle or PlacementPhase.PlacingFoot)
+                return;
+            if (!force && (DateTime.UtcNow - _lastPreviewUtc).TotalMilliseconds < 100)
+                return;
+            pose = _draft.ToPose(units);
+            aspect = _draft.AspectWidthOverHeight;
+            _lastPreviewUtc = DateTime.UtcNow;
+        }
+
+        var width = 360;
+        var height = Math.Max(100, (int)Math.Round(width / Math.Max(0.2, aspect)));
+        _preview ??= new PreviewRenderer();
+        var frame = _preview.CaptureFrame(doc, pose, units, width, height);
+        lock (Gate)
+        {
+            _lastFrame?.Dispose();
+            _lastFrame = frame;
+            if (frame is not null)
+                _previewGeneration++;
+        }
+        RaiseChanged();
+    }
+
+    static void PostPreviewCapture()
+    {
+        if (_previewPosted)
+            return;
+        _previewPosted = true;
+        _previewPump ??= CreatePreviewPump();
+        _previewPump.Start();
+    }
+
+    static System.Windows.Forms.Timer CreatePreviewPump()
+    {
+        var timer = new System.Windows.Forms.Timer { Interval = 1 };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            _previewPosted = false;
+            var doc = _pendingPreviewDoc;
+            var force = _pendingPreviewForce;
+            _pendingPreviewDoc = null;
+            _pendingPreviewForce = false;
+            if (doc is null)
+                return;
+            if (_displayPass > 0)
+            {
+                _pendingPreviewDoc = doc;
+                _pendingPreviewForce = force;
+                PostPreviewCapture();
+                return;
+            }
+
+            CapturePreview(doc, force);
+        };
+        return timer;
+    }
+
     static void DisposePreview_NoLock()
     {
+        _pendingPreviewDoc = null;
+        _pendingPreviewForce = false;
+        _previewPosted = false;
+        _previewPump?.Stop();
         _preview?.Dispose();
         _preview = null;
         _lastFrame?.Dispose();
         _lastFrame = null;
+    }
+
+    sealed class DisplayPassScope : IDisposable
+    {
+        public DisplayPassScope() => _displayPass++;
+
+        public void Dispose()
+        {
+            if (_displayPass > 0)
+                _displayPass--;
+        }
     }
 
     static bool TryPlaneIntersection(Line ray, Plane plane, out Point3d point)

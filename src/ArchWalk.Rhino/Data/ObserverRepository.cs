@@ -90,6 +90,26 @@ public static class ObserverRepository
         return Update(doc, record, recordUndo);
     }
 
+    public static bool ApplyHeightAndSpeedToAll(
+        RhinoDoc doc,
+        double eyeHeightMeters,
+        double baseSpeedMetersPerSecond,
+        bool recordUndo = true)
+    {
+        var h = WalkSettings.ClampEyeHeight(eyeHeightMeters);
+        var v = WalkSettings.ClampBaseSpeed(baseSpeedMetersPerSecond);
+        Mutate(doc, "ARCHWALK height and speed", recordUndo, store =>
+        {
+            foreach (var record in store.State.Records)
+            {
+                record.EyeHeightMeters = h;
+                record.BaseSpeedMetersPerSecond = v;
+                record.Revision++;
+            }
+        });
+        return true;
+    }
+
     public static bool ReplaceAll(RhinoDoc doc, IEnumerable<ObserverRecord> records, bool recordUndo = true)
     {
         Mutate(doc, "ARCHWALK observers", recordUndo, store =>

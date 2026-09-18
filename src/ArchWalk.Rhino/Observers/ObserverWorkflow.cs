@@ -52,7 +52,7 @@ public static class ObserverWorkflow
             units,
             ObserverRepository.NextAutomaticName(doc),
             draft.MovementMode,
-            MotionDefaults.BaseSpeedMetersPerSecond);
+            draft.BaseSpeedMetersPerSecond);
         ObserverRepository.Add(doc, record);
         _selectedId = record.Id;
         EnsureMarkers(doc, true);
@@ -97,7 +97,14 @@ public static class ObserverWorkflow
         var view = TargetViewResolver.EnsureTargetView(doc, shell, source);
         var pose = ObserverRepository.ToPose(record, units);
         var mode = record.InitialMovementMode;
-        if (!SessionController.Enter(doc, view, pose, mode, MouseLookProfile.FreeLook, deferCapture))
+        if (!SessionController.Enter(
+                doc,
+                view,
+                pose,
+                mode,
+                MouseLookProfile.FreeLook,
+                deferCapture,
+                record.BaseSpeedMetersPerSecond))
             return false;
 
         _sessionRecordId = record.Id;
